@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.api_service.mapper.ApiAccessLogMapper">
+
+    <!--
+      全站汇总只扫描 api_access_log，create_time 范围可命中
+      idx_time_status_cost(create_time, http_status, cost_points, latency_ms) 覆盖索引。
+    -->
+    <select id="selectAdminOverviewSummary"
+            resultType="com.example.api_service.model.dto.log.admin.AdminLogSummaryRow">
+        SELECT COUNT(*) AS total_calls,
+               COALESCE(SUM(CASE WHEN http_status &gt;= 200 AND http_status &lt; 300 THEN 1 ELSE 0 END), 0)
+                   AS success_calls,
+               COALESCE(SUM(cost_points), 0) AS total_cost_points,
+               COALESCE(SUM(CASE WHEN http_status = 429 THEN 1 ELSE 0 END), 0)
+                   AS rate_limit_count,
+               COALESCE(SUM(CASE WHEN http_status &gt;= 500 THEN 1 ELSE 0 END), 0)
+                   AS error5xx_count,
+               COALESCE(AVG(latency_ms), 0) AS avg_latency_ms
+        FROM api_access_log
+        WHERE create_time &gt;= #{startTime}
+          AND create_time &lt;= #{endTime}
+    </select>
+
+    <!-- 按天聚合全站趋势，Service 负责补齐缺失日期 -->
+    <select id="selectAdminDailyTrend"
+            resultType="com.example.api_service.model.dto.log.admin.AdminLogDailyTrendRow">
+        SELECT CAST(create_time AS DATE) AS stat_date,
+               COUNT(*) AS total_calls,
+               COALESCE(SUM(CASE WHEN http_status &gt;= 200 AND http_status &lt; 300 THEN 1 ELSE 0 END), 0)
+                   AS success_calls,
+               COALESCE(SUM(CASE WHEN http_status = 429 THEN 1 ELSE 0 END), 0)
+                   AS rate_limit_count,
+               COALESCE(SUM(CASE WHEN http_status &gt;= 500 THEN 1 ELSE 0 END), 0)
+                   AS error5xx_count,
+               COALESCE(SUM(cost_points), 0) AS cost_points,
+               COALESCE(AVG(latency_ms), 0) AS avg_latency_ms
+        FROM api_access_log
+        WHERE create_time &gt;= #{startTime}
+          AND create_time &lt;= #{endTime}
+        GROUP BY CAST(create_time AS DATE)
+        ORDER BY stat_date
+    </select>
+
+    <!--
+      接口排行：api_endpoint_meta 按 path 去重后再关联，避免同一路径存在
+      GET/POST 两条目录记录时把日志行放大。
+    -->
+    <select id="selectAdminEndpointRank"
+            resultType="com.example.api_service.model.dto.log.admin.AdminLogEndpointRankRow">
+        SELECT l.endpoint_path AS endpoint_path,
+               m.name AS endpoint_name,
+               COUNT(*) AS call_count,
+               COALESCE(SUM(CASE WHEN l.http_status &gt;= 200 AND l.http_status &lt; 300 THEN 1 ELSE 0 END), 0)
+                   AS success_calls,
+               COALESCE(SUM(l.cost_points), 0) AS cost_points,
+               COALESCE(SUM(CASE WHEN l.http_status = 429 THEN 1 ELSE 0 END), 0)
+                   AS rate_limit_count,
+               COALESCE(SUM(CASE WHEN l.http_status &gt;= 500 THEN 1 ELSE 0 END), 0)
+                   AS error5xx_count,
+               COALESCE(AVG(l.latency_ms), 0) AS avg_latency_ms
+        FROM api_access_log l
+        LEFT JOIN (
+            SELECT path, MIN(name) AS name
+            FROM api_endpoint_meta
+            GROUP BY path
+        ) m ON m.path = l.endpoint_path
+        WHERE l.create_time &gt;= #{startTime}
+          AND l.create_time &lt;= #{endTime}
+        GROUP BY l.endpoint_path, m.name
+        ORDER BY call_count DESC, cost_points DESC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 消耗点数 Top N 用户 -->
+    <select id="selectAdminTopConsumeUsers"
+            resultType="com.example.api_service.model.dto.log.admin.AdminLogUserConsumeRow">
+        SELECT l.user_id AS user_id,
+               MAX(u.username) AS username,
+               COALESCE(SUM(l.cost_points), 0) AS cost_points,
+               COUNT(*) AS call_count
+        FROM api_access_log l
+        LEFT JOIN sys_user u ON u.id = l.user_id
+        WHERE l.create_time &gt;= #{startTime}
+          AND l.create_time &lt;= #{endTime}
+        GROUP BY l.user_id
+        ORDER BY cost_points DESC, call_count DESC
+        LIMIT #{limit}
+    </select>
+
+    <!--
+      全站日志分页：时间范围必填，由 create_time 索引驱动扫描；
+      sys_user / api_key_info 为主键等值关联，接口名称先按 path 去重。
+    -->
+    <select id="selectAdminLogPage"
+            resultType="com.example.api_service.model.dto.log.admin.AdminLogPageRow">
+        SELECT l.id,
+               l.user_id,
+               u.username,
+               l.api_key_id,
+               k.key_prefix,
+               l.endpoint_path,
+               m.name AS endpoint_name,
+               l.http_status,
+               l.cost_points,
+               l.latency_ms,
+               l.client_ip,
+               l.create_time
+        FROM api_access_log l
+        LEFT JOIN sys_user u ON u.id = l.user_id
+        LEFT JOIN api_key_info k ON k.id = l.api_key_id
+        LEFT JOIN (
+            SELECT path, MIN(name) AS name
+            FROM api_endpoint_meta
+            GROUP BY path
+        ) m ON m.path = l.endpoint_path
+        WHERE l.create_time &gt;= #{criteria.startTime}
+          AND l.create_time &lt;= #{criteria.endTime}
+        <if test="criteria.userId != null">
+            AND l.user_id = #{criteria.userId}
+        </if>
+        <if test="criteria.username != null and criteria.username != ''">
+            AND u.username LIKE CONCAT('%', #{criteria.username}, '%')
+        </if>
+        <if test="criteria.endpointPath != null and criteria.endpointPath != ''">
+            AND l.endpoint_path = #{criteria.endpointPath}
+        </if>
+        <if test="criteria.httpStatus != null">
+            AND l.http_status = #{criteria.httpStatus}
+        </if>
+        <if test="criteria.minLatencyMs != null">
+            AND l.latency_ms &gt;= #{criteria.minLatencyMs}
+        </if>
+        ORDER BY l.create_time DESC, l.id DESC
+    </select>
+
+</mapper>

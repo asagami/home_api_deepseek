@@ -1,0 +1,25 @@
+# 邮件与 Redis 配置（数据源、JWT 等其余配置仍在 application.properties 中）
+spring:
+  mail:
+    # 生产环境通过环境变量覆盖，请使用支持 SMTP 的邮箱服务
+    host: ${MAIL_HOST:smtp.example.com}
+    port: ${MAIL_PORT:465}
+    username: ${MAIL_USERNAME:no-reply@example.com}
+    password: ${MAIL_PASSWORD:change-me}
+    default-encoding: UTF-8
+    properties:
+      mail:
+        smtp:
+          auth: true
+          ssl:
+            enable: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+      timeout: 3s

@@ -1,0 +1,30 @@
+{
+    "run": {
+        "default": "",
+        "items": [
+            {
+                "name": "api-service",
+                "projectName": "api-service",
+                "workingDirectory": "/Users/ruanyiyang/Documents/home_api_deepseek/backend",
+                "args": [],
+                "vmargs": [],
+                "env": {},
+                "preLaunchTask": ""
+            }
+        ]
+    },
+    "debug": {
+        "default": "",
+        "items": [
+            {
+                "name": "api-service",
+                "projectName": "api-service",
+                "workingDirectory": "/Users/ruanyiyang/Documents/home_api_deepseek/backend",
+                "args": [],
+                "vmargs": [],
+                "env": {},
+                "preLaunchTask": ""
+            }
+        ]
+    }
+}
