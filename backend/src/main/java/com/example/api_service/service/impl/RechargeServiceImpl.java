@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.api_service.common.BusinessException;
 import com.example.api_service.common.ErrorCode;
 import com.example.api_service.common.PageResult;
+import com.example.api_service.engine.billing.QuotaLedger;
 import com.example.api_service.model.dto.recharge.RechargeOrderCreateRequest;
 import com.example.api_service.model.dto.recharge.RechargeOrderPageRequest;
 import com.example.api_service.model.entity.RechargeOrder;
@@ -44,16 +45,19 @@ public class RechargeServiceImpl implements RechargeService {
 
     private final RechargeOrderService rechargeOrderService;
     private final SysUserService sysUserService;
+    private final QuotaLedger quotaLedger;
     private final String qrBaseUrl;
     private final long orderTtlMinutes;
 
     public RechargeServiceImpl(
             RechargeOrderService rechargeOrderService,
             SysUserService sysUserService,
+            QuotaLedger quotaLedger,
             @Value("${app.recharge.qr-base-url:https://pay.example.com/qr}") String qrBaseUrl,
             @Value("${app.recharge.order-ttl-minutes:15}") long orderTtlMinutes) {
         this.rechargeOrderService = rechargeOrderService;
         this.sysUserService = sysUserService;
+        this.quotaLedger = quotaLedger;
         this.qrBaseUrl = qrBaseUrl;
         this.orderTtlMinutes = orderTtlMinutes > 0 ? orderTtlMinutes : DEFAULT_ORDER_TTL_MINUTES;
     }
@@ -149,7 +153,7 @@ public class RechargeServiceImpl implements RechargeService {
         }
 
         long points = order.getTotalPoints() == null ? 0L : order.getTotalPoints();
-        if (!sysUserService.addBalanceQuota(userId, points)) {
+        if (!quotaLedger.credit(userId, points, false)) {
             throw new BusinessException(ErrorCode.USER_NOT_FOUND);
         }
 

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.api_service.common.BusinessException;
 import com.example.api_service.common.ErrorCode;
 import com.example.api_service.common.PageResult;
+import com.example.api_service.engine.billing.QuotaLedger;
 import com.example.api_service.model.entity.SysUser;
 import com.example.api_service.model.vo.admin.AdminUserVO;
 import com.example.api_service.service.AdminUserManageService;
@@ -22,6 +23,7 @@ public class AdminUserManageServiceImpl implements AdminUserManageService {
     private static final int STATUS_BANNED = 0;
 
     private final SysUserService sysUserService;
+    private final QuotaLedger quotaLedger;
 
     @Override
     public PageResult<AdminUserVO> list(long page, long size, String keyword, Integer status) {
@@ -60,7 +62,7 @@ public class AdminUserManageServiceImpl implements AdminUserManageService {
     @Transactional(rollbackFor = Exception.class)
     public AdminUserVO recharge(Long userId, long amount) {
         getExistingUser(userId);
-        if (!sysUserService.addQuota(userId, amount)) {
+        if (!quotaLedger.credit(userId, amount, true)) {
             throw new BusinessException(ErrorCode.USER_NOT_FOUND);
         }
         return AdminUserVO.from(getExistingUser(userId));

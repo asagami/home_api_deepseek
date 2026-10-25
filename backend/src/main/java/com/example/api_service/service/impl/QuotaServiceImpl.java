@@ -2,6 +2,7 @@ package com.example.api_service.service.impl;
 
 import com.example.api_service.common.BusinessException;
 import com.example.api_service.common.ErrorCode;
+import com.example.api_service.engine.billing.QuotaLedger;
 import com.example.api_service.model.entity.ApiAccessLog;
 import com.example.api_service.service.ApiAccessLogService;
 import com.example.api_service.service.ApiKeyInfoService;
@@ -20,6 +21,7 @@ public class QuotaServiceImpl implements QuotaService {
     private final SysUserService sysUserService;
     private final ApiKeyInfoService apiKeyInfoService;
     private final ApiAccessLogService apiAccessLogService;
+    private final QuotaLedger quotaLedger;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -31,6 +33,9 @@ public class QuotaServiceImpl implements QuotaService {
         if (!deducted) {
             throw new BusinessException(ErrorCode.QUOTA_INSUFFICIENT);
         }
+        // 遗留直扣路径绕过了 Redis 账本，扣后必须失效缓存键，否则网关热路径会读到陈旧的高余额。
+        // 事务回滚也无妨：缓存未命中会从（未变的）MySQL 重新装载正确余额。
+        quotaLedger.invalidate(userId);
 
         boolean keyUpdated = apiKeyInfoService.markUsed(apiKeyId);
         if (!keyUpdated) {

@@ -46,4 +46,21 @@ public interface SysUserMapper extends BaseMapper<SysUser> {
      */
     @Update("UPDATE sys_user SET balance_quota = balance_quota + #{points} WHERE id = #{userId}")
     int addBalanceQuota(@Param("userId") Long userId, @Param("points") long points);
+
+    /**
+     * 异步落账的无条件扣减：Redis 已授权预扣后，将本次消费增量刷回 MySQL 持久账本。
+     *
+     * <p>与 {@link #deductQuota} 不同——此处不再校验余额，因为 Redis 热路径已保证扣减合法，
+     * MySQL 仅做追赶记录；若加余额校验反而会因异步延迟（settle 滞后于 Redis）误判失败。</p>
+     *
+     * @return 受影响行数，0 表示用户不存在或已删除
+     */
+    @Update("""
+            UPDATE sys_user
+            SET balance_quota = balance_quota - #{cost},
+                update_time = NOW()
+            WHERE id = #{userId}
+              AND is_deleted = 0
+            """)
+    int settleQuota(@Param("userId") Long userId, @Param("cost") int cost);
 }

@@ -6,6 +6,7 @@ import { ArrowRight, Key, Lock, Message, User } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { sendEmailCode } from '@/api/auth'
 import { useCountdown } from '@/composables/useCountdown'
+import { useTurnstile } from '@/composables/useTurnstile'
 import { toErrorMessage } from '@/utils/error'
 
 type Mode = 'login' | 'register'
@@ -39,6 +40,10 @@ const {
   label: codeButtonLabel,
   start: startCodeCountdown,
 } = useCountdown(60)
+
+// 人机校验：配置了 VITE_TURNSTILE_SITE_KEY 才渲染 widget，本地开发默认跳过
+const turnstileContainer = ref<HTMLElement | null>(null)
+const turnstile = useTurnstile(turnstileContainer)
 
 const loginRules: FormRules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
@@ -113,15 +118,24 @@ async function handleSendCode(): Promise<void> {
   if (!valid) {
     return
   }
+  if (turnstile.enabled && !turnstile.token.value) {
+    errorMessage.value = '请先完成人机校验'
+    return
+  }
 
   sendingCode.value = true
   try {
-    await sendEmailCode(registerForm.email.trim())
+    await sendEmailCode(
+      registerForm.email.trim(),
+      turnstile.enabled ? turnstile.token.value : undefined,
+    )
     startCodeCountdown()
     ElMessage.success('验证码已发送，请查收邮箱')
   } catch (error) {
     errorMessage.value = toErrorMessage(error)
   } finally {
+    // Turnstile token 一次性有效，无论成败都重置以开始新一轮挑战
+    turnstile.reset()
     sendingCode.value = false
   }
 }
@@ -311,6 +325,9 @@ async function handleRegister(): Promise<void> {
               autocomplete="email"
               clearable
             />
+          </el-form-item>
+          <el-form-item v-if="turnstile.enabled" label="人机校验">
+            <div ref="turnstileContainer" class="turnstile-box"></div>
           </el-form-item>
           <el-form-item label="邮箱验证码" prop="code">
             <div class="code-row">
@@ -588,6 +605,10 @@ async function handleRegister(): Promise<void> {
 .code-button {
   flex: 0 0 auto;
   min-width: 7.5rem;
+}
+
+.turnstile-box {
+  width: 100%;
 }
 
 .submit-button {

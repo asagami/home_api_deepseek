@@ -104,9 +104,27 @@ public class OpenApiGatewayController {
         try {
             return objectMapper.readValue(body, requestType);
         } catch (JacksonException ex) {
-            log.warn("开放接口请求体解析失败: path={}, body={}", path, body);
+            // 仅记录错误类型与根因消息，不打印原始 body：
+            // 1) body 可能含调用方的敏感业务数据；
+            // 2) body 内嵌换行可伪造日志行（日志注入）。
+            log.warn("开放接口请求体解析失败: path={}, errorType={}, message={}",
+                    path, ex.getClass().getSimpleName(), rootMessage(ex));
             throw new BusinessException(ErrorCode.PARAM_ERROR, "请求体不是合法的 JSON 或字段类型不匹配");
         }
+    }
+
+    /**
+     * 提取 Jackson 异常的根因消息，去掉换行与控制字符以防日志注入，
+     * 并截断长度避免单条日志过长。
+     */
+    private static String rootMessage(Throwable ex) {
+        Throwable root = ex;
+        while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+        }
+        String message = root.getMessage() == null ? "" : root.getMessage();
+        String sanitized = message.replaceAll("[\\r\\n\\t]", " ").trim();
+        return sanitized.length() > 200 ? sanitized.substring(0, 200) + "..." : sanitized;
     }
 
     private void validateRequest(Object requestBody, String path) {

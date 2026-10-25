@@ -2,6 +2,7 @@ package com.example.api_service.engine.context;
 
 import com.example.api_service.common.BusinessException;
 import com.example.api_service.common.ErrorCode;
+import com.example.api_service.engine.billing.QuotaLedger;
 
 /**
  * 当前 OpenAPI 请求的计费上下文。
@@ -9,11 +10,12 @@ import com.example.api_service.common.ErrorCode;
  * <p>由开放网关拦截器在鉴权、限流、权限校验通过后写入，请求结束时必须调用
  * {@link #clear()} 释放 ThreadLocal，避免线程池复用导致上下文串号。</p>
  *
- * <p>计费采用<strong>预扣费</strong>模型：拦截器在 preHandle 注入 {@link BillingCallback}，
- * 业务模板 {@code AbstractApiHandler.execute()} 在执行真实业务逻辑之前调用
- * {@link #charge(int)} 完成数据库层面的原子扣减——只有扣减成功的请求才会继续执行，
- * 从根本上消除并发下基于内存快照的"白嫖"。若业务逻辑随后抛出异常，模板会调用
- * {@link #refund()} 退还已预扣的点数，保证服务端故障不扣费。</p>
+ * <p>计费采用<strong>Redis 原子预扣 + 状态补偿</strong>模型：拦截器在 preHandle 注入
+ * {@link BillingCallback}，业务模板 {@code AbstractApiHandler.execute()} 在执行真实业务逻辑之前
+ * 调用 {@link #charge(int)} 完成 Redis Lua 原子预扣——只有预扣成功的请求才会继续执行，
+ * 从根本上消除并发下基于内存快照的"白嫖"。业务成功后由拦截器异步将扣费结果增量刷回 MySQL；
+ * 若业务逻辑抛出异常，模板会调用 {@link #refund()} 在 Redis 中返还预扣额度（补偿），
+ * 保证服务端故障不扣费。{@link #ledgerMode} 记录本次预扣的落账轨道，供补偿与异步 settle 决策。</p>
  */
 public final class ApiContext {
 
@@ -73,6 +75,12 @@ public final class ApiContext {
 
     /** 计费回调，由拦截器注入；为 null 时（测试场景）跳过真实扣费。 */
     private BillingCallback billingCallback;
+
+    /**
+     * 本次预扣的落账轨道，由 {@link BillingCallback#charge(int)} 在扣费时回写。
+     * 免费接口（未触发回调）为 null；{@link #refund()} / 拦截器异步 settle 据此选择 Redis 或 MySQL。
+     */
+    private QuotaLedger.LedgerMode ledgerMode;
 
     /** 已通过 {@link #charge(int)} 预扣的点数，用于失败退款与调用日志记账。 */
     private int chargedCost = 0;
@@ -142,15 +150,16 @@ public final class ApiContext {
     }
 
     /**
-     * 预扣费：在执行业务逻辑之前完成数据库层面的原子扣减。
+     * 预扣费：在执行业务逻辑之前完成 Redis 层面的原子扣减。
      *
      * <p>这是并发安全的唯一扣费入口——多个并发请求各自调用此方法，
-     * 数据库的条件 UPDATE（{@code WHERE balance_quota >= cost}）保证只有余额
-     * 真正充足的请求才能扣减成功，其余请求收到 false 并被拒绝，不会执行业务逻辑。</p>
+     * 回调内部走 Redis Lua 原子 {@code decrby}（Redis 不可达时降级为 MySQL 条件 UPDATE），
+     * 保证只有余额真正充足的请求才能扣减成功，其余请求收到 false 并被拒绝，不会执行业务逻辑。
+     * 回调同时在上下文回写 {@link #ledgerMode}，供失败退款与异步 settle 选择落账轨道。</p>
      *
      * <p>扣费成功后记录已扣金额，供 {@link #refund()} 退款与调用日志记账使用。
-     * 免费接口（cost &le; 0）直接返回 true，不触发回调。无回调注入时（测试场景）
-     * 也直接返回 true。</p>
+     * 免费接口（cost &le; 0）直接返回 true，不触发回调，{@link #ledgerMode} 保持 null。
+     * 无回调注入时（测试场景）也直接返回 true。</p>
      *
      * @param cost 应扣点数
      * @return true 扣减成功或无需扣费；false 余额不足或账户不可用
@@ -167,9 +176,10 @@ public final class ApiContext {
     }
 
     /**
-     * 退还已预扣的点数。仅在业务逻辑执行失败时由模板调用。
+     * 退还已预扣的点数（补偿）。仅在业务逻辑执行失败时由模板调用。
      *
-     * <p>若 {@link #charge(int)} 未成功扣费（{@code chargedCost == 0}），此方法为空操作，
+     * <p>REDIS 模式下在 Redis 中 {@code incrby} 返还；MYSQL_FALLBACK 模式下走 MySQL 加点。
+     * 若 {@link #charge(int)} 未成功扣费（{@code chargedCost == 0}），此方法为空操作，
      * 因此可安全地在所有异常路径上无条件调用。</p>
      */
     public void refund() {
@@ -264,6 +274,14 @@ public final class ApiContext {
 
     public void setBillingCallback(BillingCallback billingCallback) {
         this.billingCallback = billingCallback;
+    }
+
+    public QuotaLedger.LedgerMode getLedgerMode() {
+        return ledgerMode;
+    }
+
+    public void setLedgerMode(QuotaLedger.LedgerMode ledgerMode) {
+        this.ledgerMode = ledgerMode;
     }
 
     /**

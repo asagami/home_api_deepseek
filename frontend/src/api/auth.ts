@@ -29,8 +29,8 @@ export interface LoginResult {
   expiresIn: number
 }
 
-export function sendEmailCode(email: string): Promise<void> {
-  return consoleHttp.post<void>('/auth/send-email-code', { email })
+export function sendEmailCode(email: string, captchaToken?: string): Promise<void> {
+  return consoleHttp.post<void>('/auth/send-email-code', { email, captchaToken })
 }
 
 export function register(payload: RegisterPayload): Promise<UserProfile> {

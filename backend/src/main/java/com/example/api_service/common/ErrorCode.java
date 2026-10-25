@@ -15,6 +15,7 @@ public enum ErrorCode {
     EMAIL_CODE_INVALID(40001, "邮箱验证码不正确或已过期", HttpStatus.BAD_REQUEST),
     RECHARGE_PACKAGE_INVALID(40002, "不支持的充值套餐档位", HttpStatus.BAD_REQUEST),
     PAY_CHANNEL_NOT_SUPPORTED(40003, "不支持的支付渠道", HttpStatus.BAD_REQUEST),
+    CAPTCHA_VERIFY_FAILED(40004, "人机校验未通过，请重新完成校验", HttpStatus.BAD_REQUEST),
     UNAUTHORIZED(40100, "未认证或登录已过期", HttpStatus.UNAUTHORIZED),
     API_KEY_MISSING(40101, "缺少 API Key", HttpStatus.UNAUTHORIZED),
     API_KEY_INVALID(40102, "无效的 API Key", HttpStatus.UNAUTHORIZED),

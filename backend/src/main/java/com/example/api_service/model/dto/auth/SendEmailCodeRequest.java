@@ -11,6 +11,10 @@ public record SendEmailCodeRequest(
         @Email(message = "邮箱格式不正确")
         @Size(max = 128, message = "邮箱长度不能超过 128")
         @Schema(description = "接收验证码的邮箱", example = "alice@example.com")
-        String email
+        String email,
+
+        @Size(max = 4096, message = "人机校验令牌长度不合法")
+        @Schema(description = "Cloudflare Turnstile 人机校验令牌；生产环境必填，开发环境校验关闭时可缺省")
+        String captchaToken
 ) {
 }

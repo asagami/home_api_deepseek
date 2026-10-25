@@ -6,6 +6,7 @@ import com.example.api_service.model.vo.open.EchoVO;
 import com.example.api_service.model.vo.open.TextStatsVO;
 import com.example.api_service.security.ApiKeyContext;
 import com.example.api_service.security.ApiKeyPrincipal;
+import com.example.api_service.security.ClientIpUtils;
 import com.example.api_service.service.OpenService;
 import com.example.api_service.service.QuotaService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -14,7 +15,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
-import org.springframework.util.StringUtils;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -34,6 +34,7 @@ public class OpenServiceController {
 
     private final OpenService openService;
     private final QuotaService quotaService;
+    private final ClientIpUtils clientIpUtils;
 
     @GetMapping("/echo")
     @Operation(summary = "回声测试", description = "原样返回 message，用于验证鉴权与计费链路")
@@ -67,15 +68,7 @@ public class OpenServiceController {
                 HTTP_OK,
                 principal.costPoints(),
                 latencyMs,
-                resolveClientIp(request)
+                clientIpUtils.resolve(request)
         );
-    }
-
-    private String resolveClientIp(HttpServletRequest request) {
-        String forwardedFor = request.getHeader("X-Forwarded-For");
-        if (StringUtils.hasText(forwardedFor)) {
-            return forwardedFor.split(",")[0].trim();
-        }
-        return request.getRemoteAddr();
     }
 }
