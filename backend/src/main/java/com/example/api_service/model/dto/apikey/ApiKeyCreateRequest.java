@@ -17,8 +17,8 @@ public record ApiKeyCreateRequest(
         String keyName,
 
         @Min(value = 1, message = "QPS 必须大于 0")
-        @Max(value = 10000, message = "QPS 不能超过 10000")
-        @Schema(description = "每秒最大请求数，默认 5", example = "5")
+        @Max(value = 20, message = "QPS 不能超过 20")
+        @Schema(description = "每秒最大请求数，默认 5，上限 20", example = "5")
         Integer rateLimitQps,
 
         @Future(message = "过期时间必须晚于当前时间")

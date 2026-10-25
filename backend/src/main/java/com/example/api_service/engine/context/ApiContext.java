@@ -6,14 +6,43 @@ import com.example.api_service.common.ErrorCode;
 /**
  * 当前 OpenAPI 请求的计费上下文。
  *
- * <p>由开放网关拦截器在鉴权、限流、权限校验与额度预检通过后写入，
- * 请求结束时必须调用 {@link #clear()} 释放 ThreadLocal，避免线程池复用导致
- * 上下文串号。业务 Handler 只有在真正执行成功后才允许 {@link #markBillable(boolean)}
- * 置为 true，服务端故障时绝不扣减用户点数。</p>
+ * <p>由开放网关拦截器在鉴权、限流、权限校验通过后写入，请求结束时必须调用
+ * {@link #clear()} 释放 ThreadLocal，避免线程池复用导致上下文串号。</p>
+ *
+ * <p>计费采用<strong>预扣费</strong>模型：拦截器在 preHandle 注入 {@link BillingCallback}，
+ * 业务模板 {@code AbstractApiHandler.execute()} 在执行真实业务逻辑之前调用
+ * {@link #charge(int)} 完成数据库层面的原子扣减——只有扣减成功的请求才会继续执行，
+ * 从根本上消除并发下基于内存快照的"白嫖"。若业务逻辑随后抛出异常，模板会调用
+ * {@link #refund()} 退还已预扣的点数，保证服务端故障不扣费。</p>
  */
 public final class ApiContext {
 
     private static final ThreadLocal<ApiContext> HOLDER = new ThreadLocal<>();
+
+    /**
+     * 计费回调，由网关拦截器注入，封装真正的数据库原子扣减 / 退款操作。
+     *
+     * <p>将计费服务（{@code SysUserService}）与业务 Handler 解耦：Handler 只通过
+     * {@link ApiContext#charge(int)} / {@link ApiContext#refund()} 触发计费，
+     * 无需感知具体的扣费实现。</p>
+     */
+    public interface BillingCallback {
+
+        /**
+         * 原子预扣费。
+         *
+         * @param cost 应扣点数（已为正数）
+         * @return true 扣减成功；false 余额不足或账户不可用
+         */
+        boolean charge(int cost);
+
+        /**
+         * 退还已预扣的点数，仅在业务执行失败时调用。
+         *
+         * @param cost 退还点数（与 {@link #charge(int)} 成功时传入的值一致）
+         */
+        void refund(int cost);
+    }
 
     /** 调用方用户 ID。 */
     private Long userId;
@@ -30,17 +59,23 @@ public final class ApiContext {
     /** 用户专属折扣率，默认 1.0 表示原价。 */
     private double customDiscount = 1.0d;
 
-    /** 用户当前剩余点数，用于扣费前预检。 */
+    /** 用户当前剩余点数快照（仅用于日志/调试，不再作为扣费判定依据）。 */
     private long userBalanceQuota;
 
     /** 计费倍率，默认 1；分页类接口按每 20 条一个计费单元累加。 */
     private int billingMultiplier = 1;
 
-    /** 是否允许扣费，默认 false，仅业务执行成功后可置为 true。 */
+    /** 是否允许记账，默认 false，仅业务执行成功后可置为 true。 */
     private boolean billable = false;
 
     /** 业务执行耗时（毫秒），用于写入调用日志。 */
     private long executionTimeMs;
+
+    /** 计费回调，由拦截器注入；为 null 时（测试场景）跳过真实扣费。 */
+    private BillingCallback billingCallback;
+
+    /** 已通过 {@link #charge(int)} 预扣的点数，用于失败退款与调用日志记账。 */
+    private int chargedCost = 0;
 
     public ApiContext() {
     }
@@ -104,6 +139,44 @@ public final class ApiContext {
         }
         double cost = context.baseCostPerCall * context.customDiscount * context.billingMultiplier;
         return Math.max(0, (int) Math.ceil(cost));
+    }
+
+    /**
+     * 预扣费：在执行业务逻辑之前完成数据库层面的原子扣减。
+     *
+     * <p>这是并发安全的唯一扣费入口——多个并发请求各自调用此方法，
+     * 数据库的条件 UPDATE（{@code WHERE balance_quota >= cost}）保证只有余额
+     * 真正充足的请求才能扣减成功，其余请求收到 false 并被拒绝，不会执行业务逻辑。</p>
+     *
+     * <p>扣费成功后记录已扣金额，供 {@link #refund()} 退款与调用日志记账使用。
+     * 免费接口（cost &le; 0）直接返回 true，不触发回调。无回调注入时（测试场景）
+     * 也直接返回 true。</p>
+     *
+     * @param cost 应扣点数
+     * @return true 扣减成功或无需扣费；false 余额不足或账户不可用
+     */
+    public boolean charge(int cost) {
+        if (cost <= 0 || billingCallback == null) {
+            return true;
+        }
+        if (billingCallback.charge(cost)) {
+            chargedCost = cost;
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 退还已预扣的点数。仅在业务逻辑执行失败时由模板调用。
+     *
+     * <p>若 {@link #charge(int)} 未成功扣费（{@code chargedCost == 0}），此方法为空操作，
+     * 因此可安全地在所有异常路径上无条件调用。</p>
+     */
+    public void refund() {
+        if (chargedCost > 0 && billingCallback != null) {
+            billingCallback.refund(chargedCost);
+            chargedCost = 0;
+        }
     }
 
     /**
@@ -183,5 +256,20 @@ public final class ApiContext {
 
     public void setExecutionTimeMs(long executionTimeMs) {
         this.executionTimeMs = Math.max(0L, executionTimeMs);
+    }
+
+    public BillingCallback getBillingCallback() {
+        return billingCallback;
+    }
+
+    public void setBillingCallback(BillingCallback billingCallback) {
+        this.billingCallback = billingCallback;
+    }
+
+    /**
+     * 已预扣的点数。业务成功时即为调用日志应记录的实际消费；为 0 表示未扣费。
+     */
+    public int getChargedCost() {
+        return chargedCost;
     }
 }

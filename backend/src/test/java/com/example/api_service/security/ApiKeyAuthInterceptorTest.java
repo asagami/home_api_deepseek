@@ -19,12 +19,17 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.LocalDateTime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -48,13 +53,18 @@ class ApiKeyAuthInterceptorTest {
     @Mock
     private UserApiPermissionService userApiPermissionService;
 
+    @Mock
+    private RedisRateLimiter rateLimiter;
+
     private ApiKeyAuthInterceptor interceptor;
 
     @BeforeEach
     void setUp() {
         AuthResponseWriter responseWriter = new AuthResponseWriter(JsonMapper.builder().build());
         interceptor = new ApiKeyAuthInterceptor(apiKeyInfoService, sysUserService,
-                apiEndpointMetaService, userApiPermissionService, responseWriter);
+                apiEndpointMetaService, userApiPermissionService, responseWriter, rateLimiter);
+        lenient().when(rateLimiter.allowFixedWindow(anyString(), anyInt(), any(Duration.class)))
+                .thenReturn(true);
     }
 
     @AfterEach
@@ -182,6 +192,9 @@ class ApiKeyAuthInterceptorTest {
                 .thenReturn(endpoint(1));
         when(userApiPermissionService.getApprovedPermission(USER_ID, ENDPOINT_ID))
                 .thenReturn(permission("1.00"));
+        // 第一次放行，第二次拒绝（模拟 Redis 固定窗口超限）
+        when(rateLimiter.allowFixedWindow(anyString(), anyInt(), any(Duration.class)))
+                .thenReturn(true, false);
 
         assertTrue(interceptor.preHandle(request(RAW_KEY), new MockHttpServletResponse(), new Object()));
         ApiKeyContext.clear();

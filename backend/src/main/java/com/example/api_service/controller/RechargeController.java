@@ -43,7 +43,7 @@ public class RechargeController {
 
     public RechargeController(
             RechargeService rechargeService,
-            @Value("${app.recharge.mock-pay-enabled:true}") boolean mockPayEnabled) {
+            @Value("${app.recharge.mock-pay-enabled:false}") boolean mockPayEnabled) {
         this.rechargeService = rechargeService;
         this.mockPayEnabled = mockPayEnabled;
     }

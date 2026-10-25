@@ -12,6 +12,7 @@ import com.example.api_service.security.ApiKeyUtils;
 import com.example.api_service.service.ApiKeyInfoService;
 import com.example.api_service.service.ApiKeyManageService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,17 +28,39 @@ public class ApiKeyManageServiceImpl implements ApiKeyManageService {
 
     private final ApiKeyInfoService apiKeyInfoService;
 
+    @Value("${app.apikey.max-per-user:5}")
+    private int maxKeysPerUser;
+
+    @Value("${app.apikey.max-qps:20}")
+    private int maxQps;
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ApiKeyCreateVO create(Long userId, ApiKeyCreateRequest request) {
+        // 限制每用户 API Key 数量，防止批量建 Key 成倍抬高总 QPS
+        long existingCount = apiKeyInfoService.lambdaQuery()
+                .eq(ApiKeyInfo::getUserId, userId)
+                .count();
+        if (existingCount >= maxKeysPerUser) {
+            throw new BusinessException(ErrorCode.API_KEY_LIMIT_EXCEEDED,
+                    "每用户最多创建 " + maxKeysPerUser + " 个 API Key，请先删除不再使用的 Key");
+        }
+
         String plaintextKey = ApiKeyUtils.generateApiKey();
+
+        // QPS 兜底校验：DTO 层 @Max 已限制，此处再次防御确保不超上限
+        int rateLimitQps = request.rateLimitQps() == null ? DEFAULT_QPS : request.rateLimitQps();
+        if (rateLimitQps > maxQps) {
+            throw new BusinessException(ErrorCode.PARAM_ERROR,
+                    "QPS 不能超过 " + maxQps);
+        }
 
         ApiKeyInfo keyInfo = new ApiKeyInfo();
         keyInfo.setUserId(userId);
         keyInfo.setKeyName(request.keyName().trim());
         keyInfo.setKeyPrefix(ApiKeyUtils.extractPrefix(plaintextKey));
         keyInfo.setKeyHash(ApiKeyUtils.sha256(plaintextKey));
-        keyInfo.setRateLimitQps(request.rateLimitQps() == null ? DEFAULT_QPS : request.rateLimitQps());
+        keyInfo.setRateLimitQps(rateLimitQps);
         keyInfo.setTotalQuota(SHARED_ACCOUNT_QUOTA);
         keyInfo.setUsedQuota(0L);
         keyInfo.setExpiredTime(request.expiredTime());

@@ -11,7 +11,7 @@ import lombok.extern.slf4j.Slf4j;
  * OpenAPI 业务执行模板。
  *
  * <p>所有 {@code /api/v1/**} 业务 Handler 的统一入口。模板负责计费倍率识别、
- * 二次余额校验、计时、异常兜底与扣费标记，子类只关注参数校验和真实业务逻辑。</p>
+ * 预扣费、计时、异常兜底与退款，子类只关注参数校验和真实业务逻辑。</p>
  *
  * @param <Req>  请求 DTO
  * @param <Resp> 响应 VO；分页场景为 {@code PageResult<VO>}
@@ -38,8 +38,13 @@ public abstract class AbstractApiHandler<Req, Resp> {
     /**
      * 统一执行入口。
      *
-     * <p>执行顺序：识别分页计费倍率 → 二次余额校验 → 参数校验 → 业务执行 →
-     * 标记可扣费。任一环节异常都会强制清除扣费标记，并通过 finally 回写耗时。</p>
+     * <p>执行顺序：识别分页计费倍率 → <strong>预扣费</strong>（数据库原子扣减）→
+     * 参数校验 → 业务执行 → 标记可记账。任一环节异常都会退还已扣点数并清除记账标记，
+     * 通过 finally 回写耗时。</p>
+     *
+     * <p>预扣费在业务逻辑之前完成，是并发安全的唯一扣费点：多个并发请求各自调用
+     * {@link ApiContext#charge(int)}，数据库条件 UPDATE 保证只有余额真正充足的请求
+     * 才能扣减成功并继续执行，其余请求被直接拒绝，从根本上消除基于内存快照的并发"白嫖"。</p>
      */
     public final Result<Resp> execute(Req request) {
         long startNanos = System.nanoTime();
@@ -56,8 +61,8 @@ public abstract class AbstractApiHandler<Req, Resp> {
             context.setBillingMultiplier(billingMultiplier);
 
             int finalCost = ApiContext.calculateFinalCost();
-            if (finalCost > context.getUserBalanceQuota()) {
-                throw new BusinessException(ErrorCode.QUOTA_EXCEEDED,
+            if (!context.charge(finalCost)) {
+                throw new BusinessException(ErrorCode.QUOTA_INSUFFICIENT,
                         "账户剩余点数不足以支付本次查询（需消耗 " + finalCost + " 点）");
             }
 
@@ -68,6 +73,7 @@ public abstract class AbstractApiHandler<Req, Resp> {
             return Result.success(data);
         } catch (BusinessException ex) {
             if (context != null) {
+                context.refund();
                 ApiContext.markBillable(false);
             }
             log.warn("接口业务异常: endpoint={}, code={}, message={}",
@@ -75,6 +81,7 @@ public abstract class AbstractApiHandler<Req, Resp> {
             throw ex;
         } catch (Exception ex) {
             if (context != null) {
+                context.refund();
                 ApiContext.markBillable(false);
             }
             log.error("接口执行失败: endpoint={}", getEndpointPath(), ex);

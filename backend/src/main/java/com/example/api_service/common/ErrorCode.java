@@ -44,8 +44,11 @@ public enum ErrorCode {
     RECHARGE_ORDER_ALREADY_PAID(40904, "订单已支付，请勿重复提交", HttpStatus.CONFLICT),
     RECHARGE_ORDER_CLOSED(40905, "订单已关闭，无法支付", HttpStatus.CONFLICT),
     RECHARGE_ORDER_EXPIRED(40906, "订单已超时，请重新下单", HttpStatus.CONFLICT),
+    API_KEY_LIMIT_EXCEEDED(40907, "API Key 数量已达上限", HttpStatus.CONFLICT),
     TOO_MANY_REQUESTS(42900, "请求过于频繁", HttpStatus.TOO_MANY_REQUESTS),
     EMAIL_CODE_SEND_TOO_FREQUENT(42901, "验证码发送过于频繁，请稍后再试", HttpStatus.TOO_MANY_REQUESTS),
+    LOGIN_LOCKED(42902, "登录失败次数过多，请稍后再试", HttpStatus.TOO_MANY_REQUESTS),
+    EMAIL_CODE_ATTEMPT_EXCEEDED(42903, "验证码错误次数过多，请重新获取", HttpStatus.TOO_MANY_REQUESTS),
     INTERNAL_ERROR(50000, "服务器内部错误", HttpStatus.INTERNAL_SERVER_ERROR),
     EMAIL_SEND_FAILED(50001, "验证码邮件发送失败，请稍后重试", HttpStatus.INTERNAL_SERVER_ERROR),
     UPSTREAM_ERROR(50400, "上游服务异常，请稍后重试", HttpStatus.GATEWAY_TIMEOUT);

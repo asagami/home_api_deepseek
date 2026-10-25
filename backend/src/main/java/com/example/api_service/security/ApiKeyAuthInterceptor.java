@@ -10,7 +10,6 @@ import com.example.api_service.service.ApiEndpointMetaService;
 import com.example.api_service.service.ApiKeyInfoService;
 import com.example.api_service.service.SysUserService;
 import com.example.api_service.service.UserApiPermissionService;
-import com.google.common.util.concurrent.RateLimiter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -20,9 +19,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.servlet.HandlerInterceptor;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 开放接口鉴权拦截器，仅拦截 /api/v1/**。
@@ -45,9 +43,7 @@ public class ApiKeyAuthInterceptor implements HandlerInterceptor {
     private final ApiEndpointMetaService apiEndpointMetaService;
     private final UserApiPermissionService userApiPermissionService;
     private final AuthResponseWriter responseWriter;
-
-    /** 单 Key 限流器；键为 api_key_info.id，进程内共享。 */
-    private final Map<Long, KeyRateLimiter> rateLimiters = new ConcurrentHashMap<>();
+    private final RedisRateLimiter rateLimiter;
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler)
@@ -86,12 +82,9 @@ public class ApiKeyAuthInterceptor implements HandlerInterceptor {
         int qps = keyInfo.getRateLimitQps() == null || keyInfo.getRateLimitQps() <= 0
                 ? DEFAULT_QPS
                 : keyInfo.getRateLimitQps();
-        // QPS 配置变更时重建限流器，避免沿用旧阈值
-        KeyRateLimiter rateLimiter = rateLimiters.compute(keyInfo.getId(), (id, existing) ->
-                existing != null && existing.qps() == qps
-                        ? existing
-                        : new KeyRateLimiter(qps, RateLimiter.create(qps)));
-        if (!rateLimiter.limiter().tryAcquire()) {
+        // 基于 Redis 的分布式 QPS 限流，跨实例共享
+        String bucket = "apikey:qps:" + keyInfo.getId();
+        if (!rateLimiter.allowFixedWindow(bucket, qps, Duration.ofSeconds(1))) {
             log.debug("API Key 触发限流: keyId={}, qps={}", keyInfo.getId(), qps);
             responseWriter.write(response, ErrorCode.TOO_MANY_REQUESTS,
                     "请求过于频繁，当前 Key 限制为 " + qps + " QPS");
@@ -142,8 +135,5 @@ public class ApiKeyAuthInterceptor implements HandlerInterceptor {
             normalized = normalized.substring(0, normalized.length() - 1);
         }
         return normalized;
-    }
-
-    private record KeyRateLimiter(int qps, RateLimiter limiter) {
     }
 }

@@ -30,10 +30,16 @@ public class JwtUtils {
         if (!StringUtils.hasText(secret)) {
             throw new IllegalStateException("app.jwt.secret 未配置");
         }
+        byte[] secretBytes = secret.getBytes(StandardCharsets.UTF_8);
+        if (secretBytes.length < 32) {
+            throw new IllegalStateException(
+                    "app.jwt.secret 长度不足，HS256 要求至少 32 字节，当前仅 "
+                            + secretBytes.length + " 字节");
+        }
         if (expirationMs <= 0) {
             throw new IllegalStateException("app.jwt.expiration-ms 必须大于 0");
         }
-        this.secretKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        this.secretKey = Keys.hmacShaKeyFor(secretBytes);
         this.expirationMs = expirationMs;
     }
 

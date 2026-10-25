@@ -2,6 +2,7 @@ package com.example.api_service.service.impl;
 
 import com.example.api_service.common.BusinessException;
 import com.example.api_service.common.ErrorCode;
+import com.example.api_service.security.RedisRateLimiter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -22,6 +23,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -33,6 +35,7 @@ class EmailServiceImplTest {
     private StringRedisTemplate redisTemplate;
     private ValueOperations<String, String> valueOperations;
     private JavaMailSender mailSender;
+    private RedisRateLimiter rateLimiter;
     private EmailServiceImpl emailService;
 
     @BeforeEach
@@ -42,8 +45,12 @@ class EmailServiceImplTest {
         valueOperations = mock(ValueOperations.class);
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         mailSender = mock(JavaMailSender.class);
-        emailService = new EmailServiceImpl(redisTemplate, mailSender);
+        rateLimiter = mock(RedisRateLimiter.class);
+        emailService = new EmailServiceImpl(redisTemplate, mailSender, rateLimiter);
         ReflectionTestUtils.setField(emailService, "mailFrom", "no-reply@example.com");
+        ReflectionTestUtils.setField(emailService, "maxVerifyAttempts", 5);
+        // 默认模拟：无历史尝试次数
+        lenient().when(rateLimiter.getCount(anyString())).thenReturn(0L);
     }
 
     @Test
@@ -97,6 +104,7 @@ class EmailServiceImplTest {
         emailService.verifyCode("alice@example.com", "123456");
 
         verify(redisTemplate).delete("auth:email:code:alice@example.com");
+        verify(rateLimiter).reset("auth:email:attempts:alice@example.com");
     }
 
     @Test
@@ -107,6 +115,8 @@ class EmailServiceImplTest {
                 () -> emailService.verifyCode("alice@example.com", "000000"));
         assertEquals(ErrorCode.EMAIL_CODE_INVALID, wrong.getErrorCode());
         verify(redisTemplate, never()).delete(anyString());
+        // 失败时递增尝试计数
+        verify(rateLimiter).incrementWithTtl(eq("auth:email:attempts:alice@example.com"), any(Duration.class));
 
         BusinessException expired = assertThrows(BusinessException.class,
                 () -> emailService.verifyCode("bob@example.com", "123456"));

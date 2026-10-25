@@ -8,14 +8,18 @@ import com.example.api_service.model.entity.SysUser;
 import com.example.api_service.model.vo.auth.LoginVO;
 import com.example.api_service.model.vo.auth.UserProfileVO;
 import com.example.api_service.security.JwtUtils;
+import com.example.api_service.security.RedisRateLimiter;
 import com.example.api_service.service.AuthService;
 import com.example.api_service.service.EmailService;
 import com.example.api_service.service.SysUserService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Duration;
 
 @Service
 @RequiredArgsConstructor
@@ -24,11 +28,19 @@ public class AuthServiceImpl implements AuthService {
     private static final long INITIAL_QUOTA = 1000L;
     private static final String ROLE_USER = "USER";
     private static final int STATUS_ENABLED = 1;
+    private static final String LOGIN_FAIL_BUCKET_PREFIX = "login:fail:";
 
     private final SysUserService sysUserService;
     private final EmailService emailService;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtils jwtUtils;
+    private final RedisRateLimiter rateLimiter;
+
+    @Value("${app.ratelimit.login.max-failures:5}")
+    private int maxLoginFailures;
+
+    @Value("${app.ratelimit.login.lockout-minutes:15}")
+    private int lockoutMinutes;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -62,15 +74,28 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public LoginVO login(LoginRequest request) {
         String username = request.username().trim();
+        String failBucket = LOGIN_FAIL_BUCKET_PREFIX + username;
+
+        // 登录失败锁定检查：连续失败达到阈值后拒绝登录，直至锁定窗口过期
+        long failCount = rateLimiter.getCount(failBucket);
+        if (failCount >= maxLoginFailures) {
+            throw new BusinessException(ErrorCode.LOGIN_LOCKED);
+        }
+
         SysUser user = sysUserService.lambdaQuery()
                 .eq(SysUser::getUsername, username)
                 .one();
         if (user == null || !passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+            // 记录失败次数，首次失败时设置锁定窗口 TTL
+            rateLimiter.incrementWithTtl(failBucket, Duration.ofMinutes(lockoutMinutes));
             throw new BusinessException(ErrorCode.INVALID_CREDENTIALS);
         }
         if (!Integer.valueOf(STATUS_ENABLED).equals(user.getStatus())) {
             throw new BusinessException(ErrorCode.ACCOUNT_DISABLED);
         }
+
+        // 登录成功，清除失败计数
+        rateLimiter.reset(failBucket);
 
         String token = jwtUtils.generateToken(user.getId(), user.getUsername(), user.getRole());
         return new LoginVO(token, "Bearer", jwtUtils.getExpirationMs());

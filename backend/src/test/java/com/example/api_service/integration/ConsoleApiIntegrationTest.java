@@ -304,7 +304,7 @@ class ConsoleApiIntegrationTest {
         String body = mockMvc.perform(post("/api/console/apikeys")
                         .header(AUTH_HEADER, bearer(token))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(json(Map.of("keyName", keyName, "rateLimitQps", 10000))))
+                        .content(json(Map.of("keyName", keyName, "rateLimitQps", 10))))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
         return objectMapper.readTree(body).path("data").path("apiKey").asString();
