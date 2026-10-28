@@ -44,10 +44,12 @@ CREATE TABLE `api_endpoint_meta` (
     `name` VARCHAR(64) NOT NULL COMMENT '接口名称 (如: IP归属地查询)',
     `path` VARCHAR(128) NOT NULL COMMENT '接口路径 (如: /api/v1/tools/ip-locate)',
     `method` VARCHAR(16) NOT NULL DEFAULT 'POST' COMMENT '请求方式: GET/POST',
+    `engine_type` VARCHAR(32) NOT NULL DEFAULT 'INTERNAL_SQL' COMMENT '引擎类型: INTERNAL_SQL, EXTERNAL_SQL, ES, HTTP_PROXY',
     `cost_per_call` INT NOT NULL DEFAULT 1 COMMENT '单次调用扣减额度',
     `description` VARCHAR(512) DEFAULT NULL COMMENT '接口描述',
     `request_schema` JSON DEFAULT NULL COMMENT '请求参数示例或JSON Schema',
     `response_schema` JSON DEFAULT NULL COMMENT '返回结果示例',
+    `engine_config` JSON DEFAULT NULL COMMENT '引擎专属配置(JSON)',
     `status` TINYINT NOT NULL DEFAULT 1 COMMENT '状态: 1-上线, 0-维护中',
     `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -121,7 +123,9 @@ VALUES
     (1004, '新闻搜索', '/api/v1/search/news', 'POST', 1, '基于 Elasticsearch 的新闻标题与正文检索',
      '{"keyword":"人工智能","pageNum":1,"pageSize":20}', 1),
     (1005, 'IP 归属地', '/api/v1/tools/ip-locate', 'POST', 1, '代理第三方 IP 归属地查询并清洗为标准结果',
-     '{"ip":"8.8.8.8"}', 1);
+     '{"ip":"8.8.8.8"}', 1),
+    (1008, 'PostgreSQL系统用户查询', '/api/v1/pg/sample-users', 'POST', 1, '外部 PostgreSQL 数据库分页查询示例接口',
+     '{"pageNum":1,"pageSize":20,"username":"postgres"}', 1);
 
 -- 供管理员按时间范围统计全站调用量、成功率、总消耗点数（覆盖索引，无需回表）
 ALTER TABLE `api_access_log`
@@ -152,3 +156,11 @@ CREATE TABLE `recharge_order` (
                                   UNIQUE KEY `uk_order_no` (`order_no`),
                                   KEY `idx_user_status` (`user_id`, `status`, `create_time`)
 ) ENGINE=InnoDB COMMENT='点数充值订单表';
+
+-- ========================================================
+-- 8. 历史数据库增量平滑迁移补丁
+-- 若已有旧版 open_api_platform 库，请手动执行以下 DDL（新版服务已内置自动检测与迁移组件）：
+-- ========================================================
+ALTER TABLE `api_endpoint_meta`
+    ADD COLUMN IF NOT EXISTS `engine_type` VARCHAR(32) NOT NULL DEFAULT 'INTERNAL_SQL' AFTER `method`,
+    ADD COLUMN IF NOT EXISTS `engine_config` TEXT NULL AFTER `response_schema`;

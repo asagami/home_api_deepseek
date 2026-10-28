@@ -1,4 +1,4 @@
-package com.example.api_service.engine.handlers.pgnew;
+package com.example.api_service.engine.handlers.apiqry;
 
 import com.example.api_service.model.dto.BasePageRequest;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -9,12 +9,12 @@ import lombok.Setter;
 import java.math.BigDecimal;
 
 /**
- * PostgreSQL用户分页查询请求参数。
+ * api用户分页查询请求参数。
  */
 @Getter
 @Setter
-@Schema(name = "PgDdlUsersPageReq", description = "PostgreSQL用户分页查询请求入参")
-public class PgDdlUsersPageReq extends BasePageRequest {
+@Schema(name = "EsApiqryPageReq", description = "api用户分页查询请求入参")
+public class EsApiqryPageReq extends BasePageRequest {
 
     @Schema(description = "用户名关键字", example = "postgres")
     private String username;

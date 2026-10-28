@@ -2,6 +2,7 @@ package com.example.api_service.controller;
 
 import com.example.api_service.common.Result;
 import com.example.api_service.model.dto.admin.codegen.ApiCodeGenSpec;
+import com.example.api_service.model.vo.admin.codegen.ApiEndpointSummaryVO;
 import com.example.api_service.model.vo.admin.codegen.CodeGenPreviewVO;
 import com.example.api_service.model.vo.admin.codegen.DataSourceOptionVO;
 import com.example.api_service.security.RequireAdmin;
@@ -36,9 +37,28 @@ public class AdminCodeGenController {
 
     @PostMapping("/write-disk")
     @Operation(summary = "写入本地项目工程", description = "将生成的类安全落盘至工作区 handlers 目录，带防覆盖保护与自动目录登记")
-    public Result<Void> writeToDisk(@Valid @RequestBody ApiCodeGenSpec spec) {
-        apiCodeGenService.writeToWorkspace(spec);
-        return Result.success();
+    public Result<String> writeToDisk(@Valid @RequestBody ApiCodeGenSpec spec) {
+        String targetDir = apiCodeGenService.writeToWorkspace(spec);
+        return Result.success(targetDir);
+    }
+
+    @PostMapping("/update")
+    @Operation(summary = "原地更新已有接口代码", description = "原地更新指定接口的 Req、VO 与 SQL，完整保留已有 Handler 自定义业务代码")
+    public Result<String> updateToDisk(@Valid @RequestBody ApiCodeGenSpec spec) {
+        String targetDir = apiCodeGenService.updateWorkspace(spec);
+        return Result.success(targetDir);
+    }
+
+    @GetMapping("/endpoints")
+    @Operation(summary = "获取已配置接口列表", description = "供接口生成器下拉选择已有接口以加载配置或更新代码")
+    public Result<List<ApiEndpointSummaryVO>> listEndpoints() {
+        return Result.success(apiCodeGenService.listConfiguredEndpoints());
+    }
+
+    @GetMapping("/endpoint-detail")
+    @Operation(summary = "加载接口生成规格详情", description = "按 path 获取接口的历史代码生成规格供前端表单回显与编辑")
+    public Result<ApiCodeGenSpec> getEndpointDetail(@RequestParam String path) {
+        return Result.success(apiCodeGenService.getEndpointSpec(path));
     }
 
     @GetMapping("/datasources")

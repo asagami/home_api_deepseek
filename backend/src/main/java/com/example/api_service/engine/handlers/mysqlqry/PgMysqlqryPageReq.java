@@ -1,4 +1,4 @@
-package com.example.api_service.engine.handlers.pgnew;
+package com.example.api_service.engine.handlers.mysqlqry;
 
 import com.example.api_service.model.dto.BasePageRequest;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -9,12 +9,12 @@ import lombok.Setter;
 import java.math.BigDecimal;
 
 /**
- * PostgreSQL用户分页查询请求参数。
+ * mysql用户分页查询请求参数。
  */
 @Getter
 @Setter
-@Schema(name = "PgDdlUsers1Req", description = "PostgreSQL用户分页查询请求入参")
-public class PgDdlUsers1Req  {
+@Schema(name = "PgMysqlqryPageReq", description = "mysql用户分页查询请求入参")
+public class PgMysqlqryPageReq extends BasePageRequest {
 
     @Schema(description = "username", example = "postgres")
     private String username;

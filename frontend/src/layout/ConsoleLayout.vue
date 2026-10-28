@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   ArrowDown,
+  Cpu,
   DataAnalysis,
   DataLine,
   Expand,
@@ -170,6 +171,15 @@ function handleLogout(): void {
               </span>
             </RouterLink>
           </el-tooltip>
+          <el-tooltip content="接口生成器" placement="right" :disabled="!collapsed">
+            <RouterLink to="/console/admin/generator" class="nav-item">
+              <el-icon :size="18"><Cpu /></el-icon>
+              <span>
+                <strong>接口生成器</strong>
+                <small>脚手架与代码生成</small>
+              </span>
+            </RouterLink>
+          </el-tooltip>
         </template>
       </nav>
     </aside>
@@ -248,16 +258,26 @@ function handleLogout(): void {
   top: 0;
   display: flex;
   flex-direction: column;
-  gap: 1.6rem;
+  gap: 1.25rem;
   height: 100vh;
-  padding: 1.6rem 1.15rem;
-  overflow: hidden;
+  padding: 1.25rem 1rem;
+  overflow-y: auto;
+  overflow-x: hidden;
   color: #cbd5e1;
   background:
     radial-gradient(circle at 10% 0%, rgba(99, 102, 241, 0.28), transparent 38%),
     #0b1222;
   border-right: 1px solid rgba(148, 163, 184, 0.08);
   transition: padding 0.22s ease, gap 0.22s ease;
+}
+
+.sidebar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 4px;
 }
 
 .sidebar-head {

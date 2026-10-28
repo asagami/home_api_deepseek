@@ -28,6 +28,12 @@ public class CodeGenPreviewVO {
     @Schema(description = "响应 VO 完整源码")
     private String voCode;
 
+    @Schema(description = "ES 文档类名 (仅 ES 引擎)")
+    private String docClassName;
+
+    @Schema(description = "ES 文档类完整源码 (仅 ES 引擎)")
+    private String docCode;
+
     @Schema(description = "Handler 类名")
     private String handlerClassName;
 

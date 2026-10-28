@@ -81,6 +81,12 @@ const router = createRouter({
           component: () => import('@/views/console/admin/logs/Index.vue'),
           meta: { requiresAuth: true, requiresAdmin: true, title: '全站日志' },
         },
+        {
+          path: 'admin/generator',
+          name: 'admin-generator',
+          component: () => import('@/views/console/admin/generator/Index.vue'),
+          meta: { requiresAuth: true, requiresAdmin: true, title: '接口生成器' },
+        },
       ],
     },
     {

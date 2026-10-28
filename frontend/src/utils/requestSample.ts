@@ -12,6 +12,7 @@ const FALLBACK_SAMPLES: Record<string, Record<string, unknown>> = {
   '/api/v1/data/my-logs': { pageNum: 1, pageSize: 20, httpStatus: 200 },
   '/api/v1/search/news': { keyword: '人工智能', pageNum: 1, pageSize: 20 },
   '/api/v1/tools/ip-locate': { ip: '8.8.8.8' },
+  '/api/v1/pg/sample-users': { pageNum: 1, pageSize: 20, username: 'postgres' },
 }
 
 /** 从 JSON Schema 的 properties 生成一份可发送的示例对象。 */

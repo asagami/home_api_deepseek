@@ -57,6 +57,18 @@ public class ApiCodeGenSpec {
     @Schema(description = "核心业务只读 SQL 模板 (针对 SQL 引擎可选)", example = "SELECT id, amount, status FROM orders WHERE 1=1")
     private String customSql;
 
+    @Schema(description = "ES 目标索引名称 (仅 ES 检索引擎时需要)", example = "news")
+    private String esIndexName;
+
+    @Schema(description = "第三方 HTTP 基础 URL (仅 HTTP 代理引擎时需要)", example = "https://ipapi.co")
+    private String upstreamBaseUrl;
+
+    @Schema(description = "第三方 HTTP 请求方法 (GET / POST)", example = "GET")
+    private String upstreamHttpMethod;
+
+    @Schema(description = "第三方 HTTP 请求头 (JSON 格式)", example = "{\"Accept\": \"application/json\"}")
+    private String upstreamHeaders;
+
     @Valid
     @Builder.Default
     @Schema(description = "请求入参字段列表")

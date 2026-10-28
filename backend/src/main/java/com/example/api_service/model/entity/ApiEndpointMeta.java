@@ -28,6 +28,9 @@ public class ApiEndpointMeta {
     /** GET / POST */
     private String method;
 
+    /** 引擎类型: INTERNAL_SQL, EXTERNAL_SQL, ES, HTTP_PROXY */
+    private String engineType;
+
     /** 单次调用扣减额度 */
     private Integer costPerCall;
 
@@ -38,6 +41,9 @@ public class ApiEndpointMeta {
 
     /** 返回结果示例 */
     private String responseSchema;
+
+    /** 引擎专属配置(JSON) */
+    private String engineConfig;
 
     /** 1-上线，0-维护中 */
     private Integer status;
