@@ -106,6 +106,25 @@ class ApiKeyAuthInterceptorTest {
     }
 
     @Test
+    void shouldRejectOfflineEndpointWithUnifiedOfflineError() throws Exception {
+        when(apiKeyInfoService.getByKeyHash(ApiKeyUtils.sha256(RAW_KEY))).thenReturn(keyInfo());
+        when(sysUserService.getById(USER_ID)).thenReturn(user(1000L));
+        ApiEndpointMeta offline = endpoint(10);
+        offline.setStatus(0);
+        when(apiEndpointMetaService.getByPathAndMethod(REQUEST_PATH, "POST")).thenReturn(offline);
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        boolean allowed = interceptor.preHandle(postRequest(), response, new Object());
+
+        assertFalse(allowed);
+        assertEquals(403, response.getStatus());
+        assertTrue(response.getContentAsString().contains("\"code\":40305"));
+        assertTrue(response.getContentAsString().contains("API 已下线"));
+        verify(userApiPermissionService, never()).getApprovedPermission(any(), any());
+        assertNull(ApiContext.get());
+    }
+
+    @Test
     void shouldPopulateBillingContextForValidRequest() throws Exception {
         stubAuthorizedCall(1000L, 10, "0.50");
         MockHttpServletRequest request = postRequest();

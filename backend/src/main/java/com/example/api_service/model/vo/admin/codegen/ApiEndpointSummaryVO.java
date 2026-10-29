@@ -28,6 +28,9 @@ public class ApiEndpointSummaryVO {
     @Schema(description = "单次调用点数", example = "1")
     private Integer costPerCall;
 
+    @Schema(description = "接口状态：1-已上线，0-已下线（未发布）", example = "0")
+    private Integer status;
+
     @Schema(description = "是否已保存生成元数据配置", example = "true")
     private Boolean hasConfig;
 }

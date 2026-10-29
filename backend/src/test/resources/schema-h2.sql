@@ -52,7 +52,7 @@ CREATE TABLE api_endpoint_meta (
     request_schema VARCHAR(4000),
     response_schema VARCHAR(4000),
     engine_config VARCHAR(4000),
-    status TINYINT NOT NULL DEFAULT 1,
+    status TINYINT NOT NULL DEFAULT 0,
     create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     is_deleted TINYINT NOT NULL DEFAULT 0,

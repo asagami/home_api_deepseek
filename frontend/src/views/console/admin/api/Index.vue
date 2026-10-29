@@ -1,12 +1,25 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
-import { EditPen, Lock, PriceTag, Refresh, Search, Stamp } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import {
+  CircleCheck,
+  CircleClose,
+  EditPen,
+  Lock,
+  PriceTag,
+  Promotion,
+  Refresh,
+  Search,
+  Stamp,
+} from '@element-plus/icons-vue'
 import {
   auditPermission,
   getMarket,
+  listAdminEndpoints,
   listAdminPermissions,
   updateEndpointCost,
+  updateEndpointStatus,
+  type AdminEndpointItem,
   type AdminPermissionItem,
   type EndpointMarketItem,
   type PermissionAuditAction,
@@ -14,7 +27,7 @@ import {
 } from '@/api/permission'
 import { toErrorMessage } from '@/utils/error'
 
-defineOptions({ name: 'AdminPermissionAuditView' })
+defineOptions({ name: 'AdminApiManageView' })
 
 type TagType = 'primary' | 'success' | 'info' | 'warning' | 'danger'
 
@@ -65,6 +78,13 @@ const pricingLoading = ref(false)
 const pricingLoaded = ref(false)
 const savingId = ref<string | null>(null)
 
+const publishRows = ref<AdminEndpointItem[]>([])
+const publishLoading = ref(false)
+const publishLoaded = ref(false)
+const publishStatusFilter = ref<'' | '0' | '1'>('')
+const publishKeyword = ref('')
+const togglingId = ref<string | null>(null)
+
 const availableActions = computed<ActionOption[]>(() => {
   const target = auditTarget.value
   if (!target) {
@@ -113,6 +133,9 @@ onMounted(() => {
 watch(activeTab, (tab) => {
   if (tab === 'pricing' && !pricingLoaded.value) {
     void loadPricing()
+  }
+  if (tab === 'publish' && !publishLoaded.value) {
+    void loadPublish()
   }
 })
 
@@ -171,13 +194,78 @@ async function loadPricing(): Promise<void> {
   }
 }
 
+async function loadPublish(): Promise<void> {
+  publishLoading.value = true
+  try {
+    publishRows.value = await listAdminEndpoints({
+      status: publishStatusFilter.value === '' ? undefined : Number(publishStatusFilter.value),
+      keyword: publishKeyword.value.trim() || undefined,
+    })
+    publishLoaded.value = true
+  } catch (error) {
+    ElMessage.error(toErrorMessage(error))
+  } finally {
+    publishLoading.value = false
+  }
+}
+
+function applyPublishFilters(): void {
+  void loadPublish()
+}
+
+function resetPublishFilters(): void {
+  publishStatusFilter.value = ''
+  publishKeyword.value = ''
+  void loadPublish()
+}
+
+async function togglePublish(row: AdminEndpointItem): Promise<void> {
+  const nextStatus: 0 | 1 = row.endpointStatus === 1 ? 0 : 1
+  if (nextStatus === 0) {
+    try {
+      await ElMessageBox.confirm(
+        `下线后「${row.name}」将立即停止对外服务，调用方会收到「API 已下线」，是否继续？`,
+        '确认下线接口',
+        { type: 'warning', confirmButtonText: '确认下线', cancelButtonText: '取消' },
+      )
+    } catch {
+      return
+    }
+  }
+
+  togglingId.value = row.id
+  try {
+    const updated = await updateEndpointStatus(row.id, nextStatus)
+    row.endpointStatus = updated.endpointStatus
+    ElMessage.success(
+      nextStatus === 1 ? `「${row.name}」已上线` : `「${row.name}」已下线`,
+    )
+  } catch (error) {
+    ElMessage.error(toErrorMessage(error))
+  } finally {
+    togglingId.value = null
+  }
+}
+
 function refreshActive(): void {
   if (activeTab.value === 'pricing') {
     void loadPricing()
+  } else if (activeTab.value === 'publish') {
+    void loadPublish()
   } else {
     void loadTickets()
   }
 }
+
+const refreshLoading = computed(() => {
+  if (activeTab.value === 'pricing') {
+    return pricingLoading.value
+  }
+  if (activeTab.value === 'publish') {
+    return publishLoading.value
+  }
+  return loading.value
+})
 
 function openAudit(row: AdminPermissionItem): void {
   if (row.status !== 0 && row.status !== 1) {
@@ -305,23 +393,20 @@ function formatTime(value: string | null): string {
 </script>
 
 <template>
-  <div class="admin-audit-page">
+  <div class="admin-api-page">
     <div class="page-head">
       <div>
         <div class="title-row">
           <span class="title-icon"><el-icon :size="20"><Stamp /></el-icon></span>
-          <h2>权限审批</h2>
+          <h2>API管理</h2>
         </div>
         <p>
-          审批开发者提交的接口调用权限工单，通过时可设置 0.00 - 1.00 的专属折扣；
-          在「API 定价管理」中可直接调整每个接口的基础点数，变更立即生效。
+          在「API权限审批工单」中审批开发者提交的调用权限申请，通过时可设置 0.00 - 1.00 的专属折扣；
+          在「API发布管理」中变更接口上下线状态（新增接口默认下线，上线后才可被调用）；
+          在「API定价管理」中可直接调整每个接口的基础点数，变更立即生效。
         </p>
       </div>
-      <el-button
-        :icon="Refresh"
-        :loading="activeTab === 'pricing' ? pricingLoading : loading"
-        @click="refreshActive"
-      >
+      <el-button :icon="Refresh" :loading="refreshLoading" @click="refreshActive">
         刷新
       </el-button>
     </div>
@@ -330,7 +415,7 @@ function formatTime(value: string | null): string {
       <el-tabs v-model="activeTab">
         <el-tab-pane name="tickets">
           <template #label>
-            <span class="tab-label"><el-icon><EditPen /></el-icon>权限审批工单</span>
+            <span class="tab-label"><el-icon><EditPen /></el-icon>API权限审批工单</span>
           </template>
 
           <div class="filter-bar">
@@ -466,6 +551,111 @@ function formatTime(value: string | null): string {
           </div>
         </el-tab-pane>
 
+        <el-tab-pane name="publish">
+          <template #label>
+            <span class="tab-label"><el-icon><Promotion /></el-icon>API发布管理</span>
+          </template>
+
+          <el-alert type="info" :closable="false" show-icon class="pricing-alert">
+            新增接口默认处于下线状态，需在此上线（状态改为 1）后才可被调用；下线后的接口对调用方统一返回「API 已下线」。
+          </el-alert>
+
+          <div class="filter-bar">
+            <el-select v-model="publishStatusFilter" class="status-select" placeholder="全部状态">
+              <el-option label="全部状态" value="" />
+              <el-option label="已上线" value="1" />
+              <el-option label="已下线" value="0" />
+            </el-select>
+            <el-input
+              v-model="publishKeyword"
+              :prefix-icon="Search"
+              clearable
+              placeholder="搜索接口名称或路径"
+              class="keyword-input"
+              @keyup.enter="applyPublishFilters"
+              @clear="applyPublishFilters"
+            />
+            <el-button type="primary" :icon="Search" @click="applyPublishFilters">查询</el-button>
+            <el-button @click="resetPublishFilters">重置</el-button>
+          </div>
+
+          <el-table
+            v-loading="publishLoading"
+            :data="publishRows"
+            stripe
+            row-key="id"
+            empty-text="暂无接口目录"
+          >
+            <el-table-column label="接口" min-width="300">
+              <template #default="{ row }">
+                <div class="api-cell">
+                  <span :class="['method-tag', methodClass(row.method)]">{{ row.method }}</span>
+                  <div class="cell-copy">
+                    <p class="primary-text">{{ row.name }}</p>
+                    <code class="sub-text">{{ row.path }}</code>
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="引擎类型" width="130">
+              <template #default="{ row }">
+                <el-tag size="small" effect="plain" round>{{ row.engineType || '—' }}</el-tag>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="基础点数" width="110">
+              <template #default="{ row }">
+                <span class="points-text">{{ row.baseCost }} 点 / 次</span>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="状态" width="110">
+              <template #default="{ row }">
+                <el-tag
+                  :type="row.endpointStatus === 1 ? 'success' : 'info'"
+                  effect="plain"
+                  size="small"
+                  round
+                >
+                  {{ row.endpointStatus === 1 ? '已上线' : '已下线' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="更新时间" width="170">
+              <template #default="{ row }">
+                <span class="sub-text">{{ formatTime(row.updateTime) }}</span>
+              </template>
+            </el-table-column>
+
+            <el-table-column label="操作" width="120" fixed="right">
+              <template #default="{ row }">
+                <el-button
+                  v-if="row.endpointStatus === 1"
+                  link
+                  type="danger"
+                  :icon="CircleClose"
+                  :loading="togglingId === row.id"
+                  @click="togglePublish(row)"
+                >
+                  下线
+                </el-button>
+                <el-button
+                  v-else
+                  link
+                  type="primary"
+                  :icon="CircleCheck"
+                  :loading="togglingId === row.id"
+                  @click="togglePublish(row)"
+                >
+                  上线
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-tab-pane>
+
         <el-tab-pane name="pricing">
           <template #label>
             <span class="tab-label"><el-icon><PriceTag /></el-icon>API 定价管理</span>
@@ -497,12 +687,12 @@ function formatTime(value: string | null): string {
             <el-table-column label="状态" width="100">
               <template #default="{ row }">
                 <el-tag
-                  :type="row.endpointStatus === 1 ? 'success' : 'warning'"
+                  :type="row.endpointStatus === 1 ? 'success' : 'info'"
                   effect="plain"
                   size="small"
                   round
                 >
-                  {{ row.endpointStatus === 1 ? '已上线' : '维护中' }}
+                  {{ row.endpointStatus === 1 ? '已上线' : '已下线' }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -672,7 +862,7 @@ function formatTime(value: string | null): string {
 </template>
 
 <style scoped>
-.admin-audit-page {
+.admin-api-page {
   display: grid;
   gap: 1.25rem;
 }

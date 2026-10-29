@@ -478,6 +478,9 @@ onMounted(() => {
                     <el-tag size="small" :type="getEngineTagType(ep.engineType)" effect="light">
                       {{ ep.engineType }}
                     </el-tag>
+                    <el-tag v-if="ep.status !== 1" size="small" type="info" effect="plain">
+                      未发布
+                    </el-tag>
                     <span class="option-path">{{ ep.path }}</span>
                   </div>
                 </div>

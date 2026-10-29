@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.util.List;
 import java.util.Locale;
 
 @Service
@@ -36,6 +37,33 @@ public class ApiEndpointMetaServiceImpl extends ServiceImpl<ApiEndpointMetaMappe
         }
         endpoint.setCostPerCall(costPerCall);
         updateById(endpoint);
+        return endpoint;
+    }
+
+    @Override
+    public List<ApiEndpointMeta> listForAdmin(Integer status, String keyword) {
+        String trimmedKeyword = StringUtils.hasText(keyword) ? keyword.trim() : null;
+        return lambdaQuery()
+                .eq(status != null, ApiEndpointMeta::getStatus, status)
+                .and(trimmedKeyword != null, wrapper -> wrapper
+                        .like(ApiEndpointMeta::getName, trimmedKeyword)
+                        .or()
+                        .like(ApiEndpointMeta::getPath, trimmedKeyword))
+                .orderByDesc(ApiEndpointMeta::getId)
+                .list();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public ApiEndpointMeta updateStatus(Long endpointId, int status) {
+        ApiEndpointMeta endpoint = getById(endpointId);
+        if (endpoint == null) {
+            throw new BusinessException(ErrorCode.ENDPOINT_NOT_FOUND);
+        }
+        if (!Integer.valueOf(status).equals(endpoint.getStatus())) {
+            endpoint.setStatus(status);
+            updateById(endpoint);
+        }
         return endpoint;
     }
 

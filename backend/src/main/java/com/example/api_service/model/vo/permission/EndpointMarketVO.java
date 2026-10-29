@@ -24,7 +24,7 @@ public record EndpointMarketVO(
         Integer applyStatus,
         @Schema(description = "审批意见 / 驳回原因") String auditRemark,
         @Schema(description = "本次申请提交时间") LocalDateTime applyTime,
-        @Schema(description = "接口状态：1-上线，0-维护中") Integer endpointStatus,
+        @Schema(description = "接口状态：1-上线，0-已下线") Integer endpointStatus,
         @Schema(description = "请求参数示例或 JSON Schema") String requestSchema,
         @Schema(description = "返回结果示例") String responseSchema
 ) {

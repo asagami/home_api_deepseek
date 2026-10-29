@@ -3,6 +3,8 @@ package com.example.api_service.service;
 import com.baomidou.mybatisplus.spring.service.IService;
 import com.example.api_service.model.entity.ApiEndpointMeta;
 
+import java.util.List;
+
 public interface ApiEndpointMetaService extends IService<ApiEndpointMeta> {
 
     /**
@@ -20,4 +22,21 @@ public interface ApiEndpointMetaService extends IService<ApiEndpointMeta> {
      * @return 更新后的接口元数据
      */
     ApiEndpointMeta updateCost(Long endpointId, int costPerCall);
+
+    /**
+     * 管理员查询接口目录，用于 API 发布管理。
+     *
+     * @param status  目标状态（1-上线，0-下线）；为 null 时不过滤
+     * @param keyword 按接口名称或路径模糊匹配；为空时不过滤
+     */
+    List<ApiEndpointMeta> listForAdmin(Integer status, String keyword);
+
+    /**
+     * 变更接口上下线状态。
+     *
+     * @param endpointId 接口 ID
+     * @param status     目标状态：1-上线，0-下线
+     * @return 更新后的接口元数据
+     */
+    ApiEndpointMeta updateStatus(Long endpointId, int status);
 }

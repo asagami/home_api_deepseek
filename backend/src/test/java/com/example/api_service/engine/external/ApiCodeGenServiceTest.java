@@ -61,6 +61,9 @@ class ApiCodeGenServiceTest {
 
         assertTrue(previewVO.getMetaSql().contains("INSERT IGNORE INTO `api_endpoint_meta`"));
         assertTrue(previewVO.getMetaSql().contains("'/api/v1/pg/orders'"));
+        // 新增接口默认初始化 status = 0（未发布），需管理员在 API 发布管理中上线
+        assertTrue(previewVO.getMetaSql().contains(", 0);"));
+        assertTrue(previewVO.getMetaSql().contains("status = 0"));
     }
 
     @Test

@@ -327,6 +327,64 @@ class PermissionApiIntegrationTest {
                 .andExpect(jsonPath("$.code").value(40304));
     }
 
+    @Test
+    void shouldPublishAndOfflineEndpointWithUnifiedOfflineError() throws Exception {
+        String userToken = registerAndLogin("publish_user_it");
+        String plaintextKey = createKey(userToken);
+        SysUser user = findUser("publish_user_it");
+        assertNotNull(user);
+        grantPermission(user.getId(), ECHO_ENDPOINT_ID, "1.00");
+        String adminToken = createAdminToken("publish_admin_it");
+
+        // 管理员可查询接口目录，普通用户无权访问发布管理
+        mockMvc.perform(get("/api/console/admin/endpoints/list")
+                        .header(AUTH_HEADER, bearer(adminToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.length()").value(2));
+
+        mockMvc.perform(get("/api/console/admin/endpoints/list")
+                        .header(AUTH_HEADER, bearer(userToken)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value(40300));
+
+        // 下线接口后，调用方统一收到「API 已下线」
+        mockMvc.perform(put("/api/console/admin/endpoints/{id}/status", ECHO_ENDPOINT_ID)
+                        .header(AUTH_HEADER, bearer(adminToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("status", 0))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.endpointStatus").value(0));
+
+        mockMvc.perform(get("/api/v1/services/echo")
+                        .param("message", "offline")
+                        .header(API_KEY_HEADER, plaintextKey))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value(40305))
+                .andExpect(jsonPath("$.message").value("API 已下线，暂时无法调用"));
+
+        // 重新上线后恢复正常调用
+        mockMvc.perform(put("/api/console/admin/endpoints/{id}/status", ECHO_ENDPOINT_ID)
+                        .header(AUTH_HEADER, bearer(adminToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("status", 1))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.endpointStatus").value(1));
+
+        mockMvc.perform(get("/api/v1/services/echo")
+                        .param("message", "online")
+                        .header(API_KEY_HEADER, plaintextKey))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.message").value("online"));
+
+        // 非法状态值直接拒绝
+        mockMvc.perform(put("/api/console/admin/endpoints/{id}/status", ECHO_ENDPOINT_ID)
+                        .header(AUTH_HEADER, bearer(adminToken))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("status", 5))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(40000));
+    }
+
     private String registerAndLogin(String username) throws Exception {
         register(username);
         return login(username);

@@ -45,7 +45,7 @@ public class ApiEndpointMeta {
     /** 引擎专属配置(JSON) */
     private String engineConfig;
 
-    /** 1-上线，0-维护中 */
+    /** 1-上线，0-已下线（新增接口默认 0，需管理员上线） */
     private Integer status;
 
     @TableField(fill = FieldFill.INSERT)
