@@ -70,10 +70,10 @@ const router = createRouter({
           meta: { requiresAuth: true, requiresAdmin: true, title: '用户管理' },
         },
         {
-          path: 'admin/audit',
-          name: 'admin-audit',
-          component: () => import('@/views/console/admin/audit/Index.vue'),
-          meta: { requiresAuth: true, requiresAdmin: true, title: '权限审批' },
+          path: 'admin/api',
+          name: 'admin-api',
+          component: () => import('@/views/console/admin/api/Index.vue'),
+          meta: { requiresAuth: true, requiresAdmin: true, title: 'API管理' },
         },
         {
           path: 'admin/logs',

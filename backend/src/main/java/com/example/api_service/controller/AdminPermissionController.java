@@ -31,14 +31,15 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/console/admin/permissions")
 @RequiredArgsConstructor
 @RequireAdmin
-@Tag(name = "Console - Admin Permissions", description = "管理员权限审批与接口点数管理（仅 ADMIN 角色）")
+@Tag(name = "Console - Admin API Management",
+        description = "API 权限审批工单与接口点数管理（仅 ADMIN 角色）")
 public class AdminPermissionController {
 
     private final UserApiPermissionService userApiPermissionService;
     private final ApiEndpointMetaService apiEndpointMetaService;
 
     @GetMapping("/list")
-    @Operation(summary = "分页查询权限申请工单",
+    @Operation(summary = "分页查询 API 权限审批工单",
             description = "返回申请人用户名、接口名称、基础点数与审批信息；支持按状态和关键字筛选")
     public Result<PageResult<AdminPermissionVO>> list(
             @RequestParam(defaultValue = "1") @Min(value = 1, message = "页码必须大于 0") long page,

@@ -50,7 +50,7 @@ CREATE TABLE `api_endpoint_meta` (
     `request_schema` JSON DEFAULT NULL COMMENT '请求参数示例或JSON Schema',
     `response_schema` JSON DEFAULT NULL COMMENT '返回结果示例',
     `engine_config` JSON DEFAULT NULL COMMENT '引擎专属配置(JSON)',
-    `status` TINYINT NOT NULL DEFAULT 1 COMMENT '状态: 1-上线, 0-维护中',
+    `status` TINYINT NOT NULL DEFAULT 0 COMMENT '状态: 1-上线, 0-已下线 (新增接口默认 0, 需管理员上线)',
     `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     `is_deleted` TINYINT NOT NULL DEFAULT 0,
@@ -164,3 +164,7 @@ CREATE TABLE `recharge_order` (
 ALTER TABLE `api_endpoint_meta`
     ADD COLUMN IF NOT EXISTS `engine_type` VARCHAR(32) NOT NULL DEFAULT 'INTERNAL_SQL' AFTER `method`,
     ADD COLUMN IF NOT EXISTS `engine_config` TEXT NULL AFTER `response_schema`;
+
+-- 新增接口默认下线，需管理员在「API 管理 → API 发布管理」中上线（改为 1）后才可调用
+ALTER TABLE `api_endpoint_meta`
+    MODIFY COLUMN `status` TINYINT NOT NULL DEFAULT 0 COMMENT '状态: 1-上线, 0-已下线 (新增接口默认 0, 需管理员上线)';

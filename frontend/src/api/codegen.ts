@@ -51,6 +51,8 @@ export interface ApiEndpointSummaryVO {
   name: string
   engineType: string
   costPerCall: number
+  /** 1-已上线，0-已下线（未发布） */
+  status?: number
   hasConfig: boolean
 }
 

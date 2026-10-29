@@ -336,7 +336,7 @@ function formatPoints(value: number): string {
               <span :class="['method-tag', methodClass(endpoint.method)]">
                 {{ endpoint.method }}
               </span>
-              <span v-if="endpoint.endpointStatus !== 1" class="maintenance-tag">维护中</span>
+              <span v-if="endpoint.endpointStatus !== 1" class="maintenance-tag">已下线</span>
             </div>
             <span :class="['status-chip', statusMeta(endpoint.applyStatus).className]">
               {{ statusMeta(endpoint.applyStatus).label }}
@@ -481,7 +481,7 @@ function formatPoints(value: number): string {
             <span :class="['method-tag', methodClass(detailTarget.method)]">
               {{ detailTarget.method }}
             </span>
-            <span v-if="detailTarget.endpointStatus !== 1" class="maintenance-tag">维护中</span>
+            <span v-if="detailTarget.endpointStatus !== 1" class="maintenance-tag">已下线</span>
             <span :class="['status-chip', statusMeta(detailTarget.applyStatus).className]">
               {{ statusMeta(detailTarget.applyStatus).label }}
             </span>
@@ -504,7 +504,7 @@ function formatPoints(value: number): string {
           </div>
           <div class="detail-metric">
             <span>接口状态</span>
-            <strong>{{ detailTarget.endpointStatus === 1 ? '运行中' : '维护中' }}</strong>
+            <strong>{{ detailTarget.endpointStatus === 1 ? '运行中' : '已下线' }}</strong>
             <em>{{ detailTarget.method }} 接口</em>
           </div>
           <div class="detail-metric">

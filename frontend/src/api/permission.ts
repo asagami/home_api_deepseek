@@ -77,6 +77,26 @@ export interface PermissionAuditPayload {
   auditRemark?: string
 }
 
+/** 管理员视角的 API 目录条目（API 发布管理） */
+export interface AdminEndpointItem {
+  id: string
+  name: string
+  path: string
+  method: string
+  engineType: string
+  baseCost: number
+  description: string | null
+  /** 1-已上线，0-已下线（新增接口默认下线） */
+  endpointStatus: number
+  createTime: string | null
+  updateTime: string | null
+}
+
+export interface AdminEndpointListQuery {
+  status?: number
+  keyword?: string
+}
+
 /** 当前用户视角的接口市场：所有接口 + 自己的申请状态 */
 export function getMarket(): Promise<EndpointMarketItem[]> {
   return consoleHttp.get<EndpointMarketItem[]>('/permissions/market')
@@ -107,4 +127,17 @@ export function auditPermission(
 /** 管理员修改接口基础点数 */
 export function updateEndpointCost(endpointId: string, costPerCall: number): Promise<void> {
   return consoleHttp.put<void>(`/admin/permissions/endpoints/${endpointId}/cost`, { costPerCall })
+}
+
+/** 管理员查询 API 目录（含上下线状态） */
+export function listAdminEndpoints(query: AdminEndpointListQuery = {}): Promise<AdminEndpointItem[]> {
+  return consoleHttp.get<AdminEndpointItem[]>('/admin/endpoints/list', { params: query })
+}
+
+/** 管理员变更 API 上下线状态：1-上线，0-下线 */
+export function updateEndpointStatus(
+  endpointId: string,
+  status: 0 | 1,
+): Promise<AdminEndpointItem> {
+  return consoleHttp.put<AdminEndpointItem>(`/admin/endpoints/${endpointId}/status`, { status })
 }

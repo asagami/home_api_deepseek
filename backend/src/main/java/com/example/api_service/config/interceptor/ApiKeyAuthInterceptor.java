@@ -114,9 +114,15 @@ public class ApiKeyAuthInterceptor implements HandlerInterceptor {
         String path = normalizePath(request.getRequestURI());
         ApiEndpointMeta endpoint = apiEndpointMetaService.getByPathAndMethod(
                 path, HttpMethod.POST.name());
-        if (endpoint == null || !Integer.valueOf(PUBLISHED).equals(endpoint.getStatus())) {
+        if (endpoint == null) {
             responseWriter.write(response, ErrorCode.ENDPOINT_NOT_FOUND,
-                    "接口不存在、未上线或未在服务目录中登记");
+                    "接口不存在或未在服务目录中登记");
+            return false;
+        }
+        // 未发布（下线）的接口统一返回「API 已下线」，避免把维护状态伪装成 404
+        if (!Integer.valueOf(PUBLISHED).equals(endpoint.getStatus())) {
+            responseWriter.write(response, ErrorCode.API_OFFLINE,
+                    "API 已下线，暂时无法调用");
             return false;
         }
 

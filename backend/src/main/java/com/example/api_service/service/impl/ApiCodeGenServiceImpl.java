@@ -246,8 +246,8 @@ public class ApiCodeGenServiceImpl implements ApiCodeGenService {
     }
 
     private List<ApiEndpointSummaryVO> fetchEndpoints() {
+        // 不过滤状态：新增接口默认下线，代码生成器仍需能加载未发布的接口进行二次修改
         List<ApiEndpointMeta> list = apiEndpointMetaMapper.selectList(Wrappers.<ApiEndpointMeta>lambdaQuery()
-                .eq(ApiEndpointMeta::getStatus, 1)
                 .orderByDesc(ApiEndpointMeta::getId));
 
         return list.stream().map(m -> {
@@ -269,6 +269,7 @@ public class ApiCodeGenServiceImpl implements ApiCodeGenService {
                     .name(m.getName())
                     .engineType(engineType != null ? engineType : "EXTERNAL_SQL")
                     .costPerCall(m.getCostPerCall())
+                    .status(m.getStatus())
                     .hasConfig(m.getEngineConfig() != null && !m.getEngineConfig().isBlank())
                     .build();
         }).toList();
@@ -279,7 +280,7 @@ public class ApiCodeGenServiceImpl implements ApiCodeGenService {
             return Collections.emptyList();
         }
         List<ApiEndpointSummaryVO> result = new ArrayList<>();
-        String sql = "SELECT path, name, cost_per_call FROM api_endpoint_meta WHERE is_deleted=0 AND status=1 ORDER BY id DESC";
+        String sql = "SELECT path, name, cost_per_call, status FROM api_endpoint_meta WHERE is_deleted=0 ORDER BY id DESC";
         try (Connection conn = dataSource.getConnection();
              Statement stmt = conn.createStatement();
              ResultSet rs = stmt.executeQuery(sql)) {
@@ -289,6 +290,7 @@ public class ApiCodeGenServiceImpl implements ApiCodeGenService {
                         .name(rs.getString("name"))
                         .engineType("EXTERNAL_SQL")
                         .costPerCall(rs.getInt("cost_per_call"))
+                        .status(rs.getInt("status"))
                         .hasConfig(false)
                         .build());
             }
@@ -720,7 +722,8 @@ public class ApiCodeGenServiceImpl implements ApiCodeGenService {
                 meta.setEngineType(spec.getEngineType());
                 meta.setCostPerCall(spec.getCostPerCall());
                 meta.setDescription(spec.getDescription());
-                meta.setStatus(1);
+                // 新增接口默认未发布（status=0），需管理员在「API 管理 → API 发布管理」中上线
+                meta.setStatus(0);
                 meta.setRequestSchema(buildSampleJson(spec));
                 meta.setEngineConfig(engineConfigJson);
                 apiEndpointMetaMapper.insert(meta);
@@ -1348,11 +1351,13 @@ public class ApiCodeGenServiceImpl implements ApiCodeGenService {
             -- 接口: %s
             -- 路径: %s
             -- 引擎: %s
+            -- 说明: 新增接口默认初始化 status = 0（未发布），
+            --       需管理员在「API 管理 → API 发布管理」中上线（改为 1）后才可被调用。
             -- ==========================================
             INSERT IGNORE INTO `api_endpoint_meta`
                 (`name`, `path`, `method`, `engine_type`, `cost_per_call`, `description`, `request_schema`, `engine_config`, `status`)
             VALUES
-                ('%s', '%s', 'POST', '%s', %d, '%s', '%s', '%s', 1);
+                ('%s', '%s', 'POST', '%s', %d, '%s', '%s', '%s', 0);
             """, spec.getApiName(), spec.getEndpointPath(), spec.getEngineType(),
                 spec.getApiName(), spec.getEndpointPath(), spec.getEngineType(), spec.getCostPerCall(),
                 spec.getDescription() != null ? spec.getDescription() : spec.getApiName(),

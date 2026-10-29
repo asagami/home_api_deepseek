@@ -153,12 +153,12 @@ function handleLogout(): void {
               </span>
             </RouterLink>
           </el-tooltip>
-          <el-tooltip content="权限审批" placement="right" :disabled="!collapsed">
-            <RouterLink to="/console/admin/audit" class="nav-item">
+          <el-tooltip content="API管理" placement="right" :disabled="!collapsed">
+            <RouterLink to="/console/admin/api" class="nav-item">
               <el-icon :size="18"><Stamp /></el-icon>
               <span>
-                <strong>权限审批</strong>
-                <small>工单审批与接口定价</small>
+                <strong>API管理</strong>
+                <small>权限工单与发布管理</small>
               </span>
             </RouterLink>
           </el-tooltip>

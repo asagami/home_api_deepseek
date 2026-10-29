@@ -54,7 +54,9 @@ home_api_deepseek/
 │       ├── utils/            # request.ts、auth.ts、requestSample.ts 等
 │       └── views/            # auth + console 各页面
 ├── docs/
-│   └── schema.sql            # 全量建表脚本与示例接口目录
+│   ├── schema.sql            # 全量建表脚本与示例接口目录
+│   └── generated_sql/
+│       └── init_endpoints.sql # 接口生成器追加的初始化 SQL（status 默认 0）
 └── MEMORY.md                 # 架构规范（部分内容被截断，以代码为准）
 ```
 
@@ -79,7 +81,7 @@ home_api_deepseek/
 |---|---|
 | `sys_user` | 开发者/管理员账号、余额点数、封禁状态 |
 | `api_key_info` | API Key（仅存 SHA-256 与脱敏前缀） |
-| `api_endpoint_meta` | 对外接口目录（路径、方法、单价、请求/响应示例、上下线） |
+| `api_endpoint_meta` | 对外接口目录（路径、方法、单价、请求/响应示例、上下线；`status` 默认 `0`，上线后为 `1`） |
 | `user_api_permission` | 用户对接口的申请、审批状态与专属折扣 |
 | `api_access_log` | 调用流水（状态码、耗时、实际扣点） |
 | `recharge_order` | 点数充值订单 |
@@ -99,7 +101,7 @@ home_api_deepseek/
 - MySQL 8 / MariaDB（本地 HikariCP 连接 `open_api_platform`）
 - Elasticsearch Java Client **9.4.5**（`Rest5Client` + `Jackson3JsonpMapper`）
 - SpringDoc **3.1.1**
-- Redis（验证码）、Guava RateLimiter（QPS）、Hutool、Lombok、spring-security-crypto（BCrypt）
+- Redis（验证码、QPS 与控制台固定窗口限流）、Hutool、Lombok、spring-security-crypto（BCrypt）
 
 **前端**
 
@@ -169,6 +171,83 @@ export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
 
 测试使用内存 H2（`src/test/resources/schema-h2.sql`），不依赖本地 MySQL。
 
+### 3.5 本地开发需修改的参数
+
+配置优先级为 **环境变量 > `application.properties` / `application.yml`**。本地调试建议用环境变量覆盖，不要把自己的数据库密码、SMTP 口令提交到仓库。
+
+#### 后端参数
+
+| 参数（环境变量） | 默认值 | 本地建议 | 说明 |
+|---|---|---|---|
+| `JAVA_HOME` | 系统 JDK | Temurin 21 | 必须 JDK 21；JDK 27 会导致 Lombok 编译崩溃 |
+| `DB_URL` | `jdbc:mysql://localhost:3306/open_api_platform?...` | 保持默认；改端口或库名时修改 | 必须已执行 `docs/schema.sql` |
+| `DB_USERNAME` | `root` | `api_service` | 本地 MariaDB 的 root / OS 用户无法通过 TCP 登录，需专用账号 |
+| `DB_PASSWORD` | 空 | `api_service_pass` | 与 `DB_USERNAME` 对应 |
+| `JWT_SECRET` | 开发用默认串 | 本地可保持默认 | HS256 密钥，**至少 32 字节**；生产必须替换 |
+| `JWT_EXPIRATION_MS` | `86400000`（24 小时） | 按需 | 控制台 Token 有效期 |
+| `REDIS_HOST` | `localhost` | 默认即可 | 注册验证码存储；未启动时注册会失败 |
+| `REDIS_PORT` | `6379` | 默认即可 | |
+| `REDIS_PASSWORD` | 空 | 本地 Redis 有密码时填写 | |
+| `REDIS_DATABASE` | `0` | 按需 | |
+| `MAIL_HOST` | `smtp.example.com` | 填真实 SMTP 地址 | **仅发送注册验证码时需要**；假值会发信失败 |
+| `MAIL_PORT` | `465` | 按需 | 默认按 SSL SMTP 配置 |
+| `MAIL_USERNAME` | `no-reply@example.com` | 真实发件账号 | |
+| `MAIL_PASSWORD` | `change-me` | SMTP 密码 / 授权码 | |
+| `ELASTICSEARCH_URL` | `http://localhost:9200` | 默认即可 | 新闻检索使用；未启动不影响应用启动，调用时返回 `50400` |
+| `ELASTICSEARCH_USERNAME` | 空 | 本地 ES 开启认证时填写 | |
+| `ELASTICSEARCH_PASSWORD` | 空 | 同上 | |
+| `NEWS_INDEX` | `news` | 与本地索引名一致 | 新闻检索索引名 |
+| `IP_GEO_BASE_URL` | `https://ipapi.co` | 默认即可（无需密钥） | IP 归属地上游地址 |
+| `RECHARGE_QR_BASE_URL` | `https://pay.example.com/qr` | 本地保持默认即可 | 充值二维码地址前缀 |
+| `RECHARGE_ORDER_TTL_MINUTES` | `15` | 按需 | 充值订单有效期 |
+| `RECHARGE_MOCK_PAY_ENABLED` | `false` | 本地联调充值流程时设为 `true`，生产必须 `false` | 是否启用模拟支付 |
+| `SERVER_PORT` | `8080` | 前端代理需同步修改 | 后端端口 |
+| `app.cors.allowed-origin-patterns` | `http://localhost:5173,http://127.0.0.1:5173` | 前端换端口时修改 | 跨域白名单；需直接改 `application.properties` |
+
+本地数据库账号（与上面的 `DB_USERNAME` / `DB_PASSWORD` 对应）：
+
+```bash
+mysql -uroot -p < docs/schema.sql
+
+mysql -uroot -p <<'SQL'
+CREATE USER IF NOT EXISTS 'api_service'@'localhost' IDENTIFIED BY 'api_service_pass';
+CREATE USER IF NOT EXISTS 'api_service'@'127.0.0.1' IDENTIFIED BY 'api_service_pass';
+GRANT ALL PRIVILEGES ON open_api_platform.* TO 'api_service'@'localhost';
+GRANT ALL PRIVILEGES ON open_api_platform.* TO 'api_service'@'127.0.0.1';
+FLUSH PRIVILEGES;
+SQL
+```
+
+注册用户默认为 `USER` 角色、初始点数 1000。要测试管理端审批和后台页面，需要手工提升为管理员：
+
+```sql
+UPDATE sys_user SET role = 'ADMIN' WHERE username = '你的账号';
+```
+
+#### 前端参数
+
+| 参数 | 位置 / 默认值 | 本地建议 | 说明 |
+|---|---|---|---|
+| `VITE_API_BASE_URL` | 由 `import.meta.env` 读取，默认 `/api` | **开发环境不要设置** | 设置后走直连；使用 Vite 代理时保持默认，只有前端直连后端时才设为完整地址，如 `http://localhost:8080/api` |
+| `server.port` | `vite.config.ts`，`5173` | 与后端 CORS 白名单保持一致 | 前端端口一旦修改，需同步更新 `app.cors.allowed-origin-patterns` |
+| `server.proxy./api.target` | `vite.config.ts`，`http://localhost:8080` | 后端换端口时同步修改 | 开发环境 `/api` 代理目标 |
+| Node.js | — | 22.18+ / 24.12+ | Vite 8 的最低版本要求 |
+
+前端本地覆盖变量写入 `frontend/.env.local`（已被 `.gitignore` 的 `*.local` 忽略）：
+
+```bash
+# 仅在前端需要直连其他后端地址时使用；使用 Vite 代理时不要创建该变量
+VITE_API_BASE_URL=http://localhost:8080/api
+```
+
+#### 参数修改注意事项
+
+- 后端默认值统一在 `backend/src/main/resources/application.properties` 与 `application.yml`；后端**不会读取 `.env` 文件**，本地覆盖请用 `export`、IDE Run Configuration 或 Maven 启动参数。
+- 只改后端端口时，需要同时改 `SERVER_PORT`、`vite.config.ts` 的代理目标和 `app.cors.allowed-origin-patterns` 三处。
+- `./mvnw test` 使用 H2，不需要配置 `DB_*`；测试环境的 JWT 密钥在 `src/test/resources/application.properties` 中单独维护。
+- 邮件与 Redis 只影响注册发码；不调试注册流程时可以暂时忽略，但用假 SMTP 发码一定失败。
+- ES 相关参数只影响新闻检索接口；ES 未启动时应用仍可启动，调用检索接口返回 `50400` 属于预期行为。
+
 ---
 
 ## 4. 双轨路由与鉴权
@@ -197,8 +276,8 @@ export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
 1. 非 `POST` → `40500`（HTTP 405）
 2. 提取 `X-API-Key`（格式 `sk-` + 48 位随机串，数据库只存 SHA-256 与脱敏前缀），SHA-256 后查 `api_key_info`，校验启用/过期
 3. 校验用户存在且未封禁
-4. 按 `rate_limit_qps` 做进程内 Guava `RateLimiter` 限流 → 超限 `42900`（HTTP 429）
-5. 按路径 + `POST` 匹配 `api_endpoint_meta`，未登记或未上线 → `40404`
+4. 按 `rate_limit_qps` 做 Redis 固定窗口限流（跨实例共享）→ 超限 `42900`（HTTP 429）
+5. 按路径 + `POST` 匹配 `api_endpoint_meta`，未登记 → `40404`；`status = 0`（未发布/已下线）→ `40305`「API 已下线」
 6. 校验 `user_api_permission` 存在 `status=1` 的授权 → 否则 `40304`
 7. 写入 `ApiContext`：用户、Key、接口、基础单价、专属折扣、余额
 8. 请求完成后，仅当 Handler 标记 `billable=true` 才扣费并异步写 `api_access_log`
@@ -289,7 +368,7 @@ Result.failure(ErrorCode.PARAM_ERROR); // 失败
 | `400xx` | 参数/请求体 | `40000` 参数错误、`40001` 验证码错误 |
 | `401xx` | 未认证 | `40100` 未登录、`40101` 缺少 Key、`40102` Key 无效、`40105` 缺少令牌 |
 | `402xx` | 余额不足 | `40200` 额度不足、`40201` 本次调用点数不足 |
-| `403xx` | 无权限 | `40300` 禁止访问、`40301` 账号封禁、`40304` 无接口权限 |
+| `403xx` | 无权限 | `40300` 禁止访问、`40301` 账号封禁、`40304` 无接口权限、`40305` API 已下线 |
 | `404xx` | 资源不存在 | `40400` 资源不存在、`40404` 接口未登记 |
 | `405xx` | 方法不允许 | `40500` 非 POST 调用开放接口 |
 | `409xx` | 状态冲突 | `40900` 冲突、`40902` 已有待审批申请、`40904` 订单已支付 |
@@ -381,11 +460,13 @@ AbstractApiHandler<Req, Resp>                 // 执行入口：上下文、计�
 1. 在 `engine/handlers/<domain>/` 下新建请求 DTO、响应 VO（ES 另需文档类）。
 2. 继承对应基类，加 `@Component`，实现抽象方法。
 3. `getEndpointPath()` 返回值必须与 `api_endpoint_meta.path` **逐字符一致**，且以 `/api/v1/` 开头。
-4. 在 `docs/schema.sql` 的 `api_endpoint_meta` 中登记目录行（`method` 必须为 `POST`，`status=1`）。
+4. 在 `docs/schema.sql`（或生成器追加的 `docs/generated_sql/init_endpoints.sql`）中登记目录行：`method` 必须为 `POST`，新接口的 `status` 用 `0`，上线后改为 `1`。
 5. 为调用者写入一条 `status=1` 的 `user_api_permission`（本地可走管理端审批或直接 SQL）。
 6. 前端调试台可选：在 `frontend/src/utils/requestSample.ts` 增加兜底示例，或在目录行维护 `request_schema`。
 7. 补单元测试 / 集成测试。
 
+> 以上步骤可改用第 6.4 节的「接口生成器」自动完成 1-4 步（含目录登记），再手工补业务细节。
+>
 > 启动时网关会扫描所有 `AbstractApiHandler` Bean：路径重复、路径不以 `/api/v1/` 开头都会**直接导致启动失败**。
 
 ### 6.3 必读安全规则
@@ -396,6 +477,76 @@ AbstractApiHandler<Req, Resp>                 // 执行入口：上下文、计�
 - **敏感配置不硬编码**：上游密钥从 `application.properties` / 环境变量读取。
 - **分页必须安全**：使用 `getSafePageNum()` / `getSafePageSize()`，不要直接 `new Page<>(request.getPageNum(), ...)`。
 - **SQL 只读**：`AbstractSqlApiHandler` 已加只读事务，需要写操作的接口不应放在开放轨道。
+
+### 6.4 接口生成器（可视化脚手架）
+
+管理端「接口生成器」（前端路由 `/console/admin/generator`）把 6.2 的前 4 步变成表单操作：配置契约 → 定义入参/出参 → 实时预览 → 一键落盘，同时生成初始化 SQL 并自动登记 `api_endpoint_meta`。仅 ADMIN 角色可用，后端实现是 `AdminCodeGenController` + `ApiCodeGenServiceImpl`。
+
+#### 6.4.1 两种模式
+
+| 模式 | 用途 | 行为 |
+|---|---|---|
+| 创建新接口 | 从零生成一套 Handler / DTO / VO | 新建文件；目标文件已存在时直接拒绝，**绝不覆盖** |
+| 修改已有接口 | 调整已生成接口的入参、出参与 SQL | 只覆写 Req、VO（ES 另含 EsDoc），并仅替换 Handler 中的 SQL 锚点区 |
+
+修改模式的下拉会列出 `api_endpoint_meta` 中**全部**接口（包括未发布，带「未发布」标签）。选中后按 `path` 读取 `engine_config` 回显；老接口没有 `engine_config` 时，会从 Handler 源码逆向推导 SQL、数据源、索引与字段。
+
+#### 6.4.2 操作步骤
+
+1. 选择模式：创建新接口 / 修改已有接口（修改模式先选目标接口）。
+2. 「基础契约配置」：接口中文名称、`domain` 包名、单价、对外路径、引擎类型及引擎专属配置。
+3. 「请求入参定义 (DTO)」：用「添加参数」逐条维护，或用「从 JSON 导入」粘贴示例 JSON 自动生成字段。
+4. 「响应出参定义 (VO)」：用「添加字段」维护，或用「从 SQL 推导」按 SELECT 列生成出参。
+5. 右侧预览区随表单实时刷新（约 400ms 防抖），可查看 Req / VO / EsDoc / Handler / 初始化 SQL 五份产物，并支持单份复制。
+6. 点击「写入本地项目工程」（修改模式为「原地更新接口代码」），确认后落盘。
+7. 重新编译并重启后端，让新 Handler 被网关扫描注册。
+8. 进入「API管理 → API发布管理」把接口上线（`status: 0 → 1`）。
+9. 调用方在接口市场提交申请，管理员在「API权限审批工单」通过后即可调用。
+
+#### 6.4.3 引擎与必填项
+
+| 引擎 | 必填 / 常用配置 | 生成的 Handler |
+|---|---|---|
+| `EXTERNAL_SQL` | 目标外部数据源 key、只读 SQL | `AbstractExternalSqlApiHandler`，内置分页与行映射 |
+| `INTERNAL_SQL` | 只读 SQL | `AbstractSqlApiHandler`，仅生成骨架，`doExecute` 抛 `UnsupportedOperationException`，需手工注入本地 Mapper |
+| `ES` | 索引名 | `AbstractEsApiHandler` + `EsDoc`，强制分页 |
+| `HTTP_PROXY` | 上游 base URL、HTTP 方法、请求头 | `AbstractHttpProxyApiHandler`，响应清洗在 `transformResponse` |
+
+校验规则：路径必须以 `/api/v1/` 开头；`domain` 只能是小写字母、数字与下划线；`EXTERNAL_SQL` 必须选择数据源。查本地或异构库优先用 `EXTERNAL_SQL`，`INTERNAL_SQL` 生成后仍需补 Mapper 代码。
+
+#### 6.4.4 产物
+
+以路径 `/api/v1/pg/orders` 为例，类名前缀为 `PgOrders`：
+
+| 产物 | 位置 / 命名 |
+|---|---|
+| 请求 DTO | `engine/handlers/<domain>/PgOrdersPageReq.java`（分页继承 `BasePageRequest`；非分页为 `PgOrdersReq`） |
+| 响应 VO | `engine/handlers/<domain>/PgOrdersOpenVO.java`（`record`） |
+| ES 文档 | `engine/handlers/<domain>/PgOrdersEsDoc.java`（仅 ES） |
+| Handler | `engine/handlers/<domain>/PgOrdersApiHandler.java`（`@Component`） |
+| 初始化 SQL | 追加到 `docs/generated_sql/init_endpoints.sql`，`INSERT IGNORE` 且 `status = 0` |
+| 目录登记 | 自动写入 `api_endpoint_meta`（含 `engine_config`，供生成器下次回显） |
+
+#### 6.4.5 安全与注意事项
+
+- **严格防覆盖**：创建模式以 `CREATE_NEW` 写文件，同名文件存在时直接报错，不会改动已有业务代码。
+- **修改范围受限**：修改模式只覆写 Req / VO / EsDoc，并仅替换 Handler 中 `// >>>>> AUTO_SQL_TEMPLATE_START >>>>>` 与 `// <<<<< AUTO_SQL_TEMPLATE_END <<<<<` 之间的 SQL；锚点之外的自定义方法、日志、参数处理全部保留。
+- **路由与包名锁定**：修改模式禁止改路径与 domain，避免与已注册的 Handler 冲突。
+- **新接口默认下线**：生成的初始化 SQL 与数据库登记都是 `status = 0`，必须在「API发布管理」上线；未上线调用统一返回 `40305`「API 已下线」。
+- **写盘依赖进程工作目录**：生成器会从后端进程的工作目录向上查找 `backend/src/main/java/com/example/api_service/engine/handlers`，请从仓库目录内启动后端（`cd backend && ./mvnw spring-boot:run`）。
+- **必须重启**：Handler 路由在启动时一次性注册，写完代码需重新编译并重启后端，否则网关匹配不到 Handler，调用返回 `40400`。
+- **生成后自检**：至少执行 `./mvnw -q -DskipTests compile` 确认可编译，再重启联调。
+
+#### 6.4.6 生成器后端接口
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `POST` | `/api/console/admin/codegen/preview` | 内存渲染预览，不落盘 |
+| `POST` | `/api/console/admin/codegen/write-disk` | 创建并落盘，返回目标目录绝对路径 |
+| `POST` | `/api/console/admin/codegen/update` | 原地更新已有接口 |
+| `GET` | `/api/console/admin/codegen/endpoints` | 已登记接口列表（含未发布） |
+| `GET` | `/api/console/admin/codegen/endpoint-detail?path=...` | 读取生成规格供表单回显 |
+| `GET` | `/api/console/admin/codegen/datasources` | 可用外部数据源 |
 
 ---
 
@@ -578,8 +729,10 @@ INSERT INTO `api_endpoint_meta`
 VALUES
     (1006, '我的点数流水', '/api/v1/data/my-points', 'POST', 1,
      '按类型分页查询当前用户的点数流水，每 20 条一个计费单元',
-     '{"pageNum":1,"pageSize":20,"recordType":2}', 1);
+     '{"pageNum":1,"pageSize":20,"recordType":2}', 0);
 ```
+
+> 新增接口默认 `status = 0`（未发布），需在「API管理 → API发布管理」上线后调用方才能访问；直接写 `1` 等同于立即上线。
 
 ### 7.6 调用
 
@@ -802,8 +955,10 @@ INSERT INTO `api_endpoint_meta`
 VALUES
     (1007, '文章搜索', '/api/v1/search/article', 'POST', 1,
      '基于 Elasticsearch 的文章标题与正文检索',
-     '{"keyword":"人工智能","pageNum":1,"pageSize":20}', 1);
+     '{"keyword":"人工智能","pageNum":1,"pageSize":20}', 0);
 ```
+
+> 新增接口默认 `status = 0`（未发布），需在「API管理 → API发布管理」上线后调用方才能访问；直接写 `1` 等同于立即上线。
 
 ---
 
@@ -1008,9 +1163,11 @@ INSERT INTO `api_endpoint_meta`
 VALUES
     (1008, '天气查询', '/api/v1/tools/weather', 'POST', 1,
      '代理第三方天气服务并清洗为标准结果',
-     '{"city":"上海"}', 1);
+     '{"city":"上海"}', 0);
 ```
 
+> 新增接口默认 `status = 0`（未发布），需在「API管理 → API发布管理」上线后调用方才能访问；直接写 `1` 等同于立即上线。
+>
 > 注意：`api_endpoint_meta.method` 记录的是**平台对外暴露的调用方式**，统一为 `POST`；与 Handler 内部调用上游使用的 GET/POST 无关。
 
 ---
@@ -1025,7 +1182,8 @@ VALUES
 - [ ] 响应使用 VO，不直接返回 Entity / `IPage` / ES 原始响应
 - [ ] 第三方密钥来自配置，无硬编码
 - [ ] 异常路径不会扣费（不捕获后正常返回）
-- [ ] `docs/schema.sql` 已登记目录行：`method='POST'`、`status=1`、`cost_per_call` 合理
+- [ ] `docs/schema.sql`（或 `docs/generated_sql/init_endpoints.sql`）已登记目录行：`method='POST'`、`cost_per_call` 合理
+- [ ] 目录状态已处理：新接口 `status=0`，在「API管理 → API发布管理」上线后为 `1`
 - [ ] 调用者的 `user_api_permission.status = 1`
 - [ ] 前端调试台示例：`request_schema` 或 `src/utils/requestSample.ts` 兜底
 - [ ] 测试：H2 环境下新增目录行时同步调整受影响的断言
@@ -1135,6 +1293,21 @@ export function createExample(payload: { name: string }): Promise<ExampleItem> {
 
 管理员页面额外加 `requiresAdmin: true`。
 
+### 11.4 管理员「API管理」模块
+
+前端菜单「API管理」（路由 `/console/admin/api`，需 ADMIN）包含三个子功能，对应后端两组接口：
+
+| 子功能 | 作用 | 后端接口 |
+|---|---|---|
+| API权限审批工单 | 审批调用申请、设置专属折扣、收回权限 | `GET /api/console/admin/permissions/list`、`PUT /api/console/admin/permissions/{id}/audit` |
+| API发布管理 | 查看接口目录、上线/下线 | `GET /api/console/admin/endpoints/list`、`PUT /api/console/admin/endpoints/{endpointId}/status` |
+| API定价管理 | 调整接口基础点数 | `PUT /api/console/admin/permissions/endpoints/{endpointId}/cost` |
+
+- 审批动作：`APPROVE`（可带 `customDiscount`）、`REJECT`（必须带 `auditRemark`）、`REVOKE`。
+- 发布动作：body `{ "status": 0 | 1 }`；`0` 为下线（调用方收到 `40305`「API 已下线」），`1` 为上线。
+- 接口目录由代码生成器（见 6.4）或手工 SQL 新增，默认 `status = 0`，必须经「API发布管理」上线。
+- 旧路由 `/console/admin/audit` 已更名为 `/console/admin/api`，页面组件仍是 `views/console/admin/api/Index.vue`。
+
 ---
 
 ## 12. 本地联调与测试注意事项
@@ -1160,12 +1333,16 @@ export DB_PASSWORD=api_service_pass
 
 若出现 `Failed to obtain JDBC Connection` / `Access denied for user`，先检查数据库账号，不要先怀疑拦截器。
 
+旧库升级时执行 `docs/schema.sql` 第 8 节的迁移段，其中会把 `api_endpoint_meta.status` 的默认值改为 `0`（新增接口默认未发布）。
+
 ### 12.3 测试数据与断言
 
 - 测试使用 `src/test/resources/schema-h2.sql`。
 - `PermissionApiIntegrationTest` 断言接口市场只返回 **2** 个接口；向 H2 增加目录行会破坏该断言，需要同步修改测试预期。
+- H2 中 `api_endpoint_meta.status` 的建表默认值同样是 `0`；种子数据显式写 `1`。新增测试若插入目录行，需要显式设置期望的状态。
+- `PermissionApiIntegrationTest#shouldPublishAndOfflineEndpointWithUnifiedOfflineError` 会在事务内把接口 1001 下线再上线，方法结束回滚，不影响其他用例。
 - `docs/schema.sql` 中的 1003–1005（个人日志、新闻搜索、IP 归属地）只存在于真实数据库脚本，不在 H2 中。
-- Guava `RateLimiter` 只保留约 1 秒的令牌存量，连续 MockMvc 调用低 QPS 的 Key 会返回 429；多调用测试请使用高 `rateLimitQps`。
+- 限流基于 Redis 1 秒固定窗口；连续 MockMvc 调用低 `rateLimitQps` 的 Key 会返回 429，多调用测试请使用高 `rateLimitQps`。
 
 ### 12.4 ES
 
@@ -1176,7 +1353,9 @@ export DB_PASSWORD=api_service_pass
 
 - `frontend/.gitignore` 中的 `logs` 规则必须写成 `/logs`，否则会忽略 `src/views/console/admin/logs/`，导致该目录的 Tailwind 类不生成。
 - 测试登录页前先清除 `localStorage` 中的 `api_console_access_token`，否则 `guestOnly` 守卫会重定向。
-- 调试台只展示 `applyStatus === 1 && endpointStatus === 1` 的接口，新增接口必须先审批通过。
+- 调试台只展示 `applyStatus === 1 && endpointStatus === 1` 的接口，新增接口必须先上线并审批通过。
+- 市场页、定价页对 `status = 0` 的接口显示「已下线」；市场仍允许提交申请，但实际调用返回 `40305`。
+- 管理端「API管理」路由已从 `/console/admin/audit` 改为 `/console/admin/api`；旧书签会命中兜底重定向回首页。
 
 ### 12.6 已知约束
 
@@ -1192,7 +1371,10 @@ export DB_PASSWORD=api_service_pass
 |---|---|---|
 | 编译报 Lombok `EndPosTable` | 使用了 JDK 27 | 切换 JDK 21 |
 | `40105` 缺少令牌 | 后端仍是旧进程，或未携带 `Authorization` | 重启后端，检查前端 token |
-| `40404` 接口不存在 | `api_endpoint_meta` 缺少 `path + POST` 行或 `status != 1` | 补目录行 |
+| `40404` 接口不存在 | `api_endpoint_meta` 缺少 `path + POST` 行 | 补目录行 |
+| `40305` API 已下线 | 接口 `status = 0`（未发布 / 被下线） | 在「API管理 → API发布管理」上线 |
+| 生成器提示“目标文件已存在” | 防覆盖保护 | 改用「修改已有接口」，或删除旧文件后重试 |
+| 新生成接口调用返回 `40400`/`40404` | Handler 未注册（未重启）或目录行缺失 | 重新编译重启后端，并确认 `api_endpoint_meta` 有该行 |
 | `40304` 无接口权限 | 缺少 `status=1` 的 `user_api_permission` | 提交申请并审批 |
 | `40500` 方法不允许 | 对 `/api/v1/**` 使用了 GET | 改为 POST + JSON |
 | `40201` 点数不足 | 余额低于本次计费 | 充值或调整 pageSize |
@@ -1214,6 +1396,9 @@ export DB_PASSWORD=api_service_pass
 | ES 检索 | `backend/src/main/java/com/example/api_service/engine/handlers/news/PublicNewsSearchApiHandler.java` |
 | 第三方转发 | `backend/src/main/java/com/example/api_service/engine/handlers/geo/IpGeoLocateApiHandler.java` |
 | 动态网关 | `backend/src/main/java/com/example/api_service/controller/gateway/OpenApiGatewayController.java` |
+| 接口生成器 | `backend/src/main/java/com/example/api_service/controller/AdminCodeGenController.java`、`service/impl/ApiCodeGenServiceImpl.java` |
+| API 发布管理 | `backend/src/main/java/com/example/api_service/controller/AdminEndpointController.java` |
+| 管理端 API 管理页 | `frontend/src/views/console/admin/api/Index.vue`、`frontend/src/api/permission.ts` |
 | 计费拦截器 | `backend/src/main/java/com/example/api_service/config/interceptor/ApiKeyAuthInterceptor.java` |
 | 公共契约 | `backend/src/main/java/com/example/api_service/common/` |
 | 目录与索引 | `docs/schema.sql` |

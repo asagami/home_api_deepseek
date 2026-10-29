@@ -31,6 +31,7 @@ public enum ErrorCode {
     QUOTA_EXHAUSTED(40302, "账户剩余额度不足", HttpStatus.FORBIDDEN),
     OPERATION_NOT_ALLOWED(40303, "不允许执行该操作", HttpStatus.FORBIDDEN),
     API_PERMISSION_DENIED(40304, "未获得该接口的调用权限", HttpStatus.FORBIDDEN),
+    API_OFFLINE(40305, "API 已下线", HttpStatus.FORBIDDEN),
     NOT_FOUND(40400, "资源不存在", HttpStatus.NOT_FOUND),
     API_KEY_NOT_FOUND(40401, "API Key 不存在", HttpStatus.NOT_FOUND),
     USER_NOT_FOUND(40402, "用户不存在", HttpStatus.NOT_FOUND),

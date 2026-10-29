@@ -37,6 +37,7 @@ public class ApiKeyAuthInterceptor implements HandlerInterceptor {
     private static final String API_KEY_HEADER = "X-API-Key";
     private static final int DEFAULT_QPS = 1;
     private static final int ENABLED = 1;
+    private static final int PUBLISHED = 1;
 
     private final ApiKeyInfoService apiKeyInfoService;
     private final SysUserService sysUserService;
@@ -96,6 +97,12 @@ public class ApiKeyAuthInterceptor implements HandlerInterceptor {
         if (endpoint == null) {
             responseWriter.write(response, ErrorCode.ENDPOINT_NOT_FOUND,
                     "接口不存在或未在服务目录中登记");
+            return false;
+        }
+        // 未发布（下线）的接口统一返回「API 已下线」，与动态网关保持一致
+        if (!Integer.valueOf(PUBLISHED).equals(endpoint.getStatus())) {
+            responseWriter.write(response, ErrorCode.API_OFFLINE,
+                    "API 已下线，暂时无法调用");
             return false;
         }
 
