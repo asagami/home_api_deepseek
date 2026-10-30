@@ -57,6 +57,9 @@ public class SecurityStartupValidator {
     @Value("${app.captcha.turnstile.secret-key:}")
     private String turnstileSecretKey;
 
+    @Value("${app.password-reset.link-base-url:}")
+    private String passwordResetLinkBaseUrl;
+
     @PostConstruct
     public void validate() {
         boolean isProd = Arrays.asList(environment.getActiveProfiles()).contains("prod");
@@ -97,6 +100,7 @@ public class SecurityStartupValidator {
             }
             assertSwaggerDisabledInProd();
             assertCaptchaEnabledInProd();
+            assertPasswordResetLinkConfiguredInProd();
             log.info("安全启动校验通过：生产环境 JWT 密钥、支付、Swagger 与人机校验配置均合规");
         } else {
             if (DEV_JWT_SECRET.equals(jwtSecret)) {
@@ -174,6 +178,22 @@ public class SecurityStartupValidator {
             throw new IllegalStateException(
                     "生产环境禁止开启 Swagger try-it-out（springdoc.swagger-ui.try-it-out-enabled="
                             + tryItOutEnabled + "），即便 UI 已下线也必须保持 false 以防配置回滚时单点泄露");
+        }
+    }
+
+    /**
+     * 生产环境的密码重置链接必须指向可公网访问的前端地址。
+     *
+     * <p>默认值是 {@code http://localhost:5173/reset-password}，直接上线会让所有用户
+     * 收到打不开的重置邮件；缺省或仍指向本机时 fail-fast。</p>
+     */
+    private void assertPasswordResetLinkConfiguredInProd() {
+        String url = passwordResetLinkBaseUrl;
+        if (url == null || url.isBlank()
+                || url.contains("localhost") || url.contains("127.0.0.1")) {
+            throw new IllegalStateException(
+                    "生产环境必须通过 PASSWORD_RESET_LINK_BASE_URL 配置公网可访问的重置密码页面地址，"
+                            + "当前为 '" + url + "'；否则找回密码邮件中的链接不可用");
         }
     }
 }

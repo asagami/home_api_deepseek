@@ -193,6 +193,10 @@ export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
 | `MAIL_PORT` | `465` | 按需 | 默认按 SSL SMTP 配置 |
 | `MAIL_USERNAME` | `no-reply@example.com` | 真实发件账号 | |
 | `MAIL_PASSWORD` | `change-me` | SMTP 密码 / 授权码 | |
+| `PASSWORD_RESET_LINK_BASE_URL` | `http://localhost:5173/reset-password` | 本地默认即可 | 找回密码邮件中的重置链接前缀；**生产必须改为公网前端地址**，prod 启动校验会拒绝 localhost |
+| `PASSWORD_RESET_TOKEN_TTL_MINUTES` | `30` | 按需 | 重置链接有效期（分钟） |
+| `PASSWORD_RESET_TICKET_TTL_MINUTES` | `10` | 按需 | 令牌校验通过后一次性票据有效期（分钟） |
+| `PASSWORD_RESET_RESEND_COOLING_SECONDS` | `60` | 按需 | 同一账号两次重置邮件的最小间隔（秒），0 表示不限制 |
 | `ELASTICSEARCH_URL` | `http://localhost:9200` | 默认即可 | 新闻检索使用；未启动不影响应用启动，调用时返回 `50400` |
 | `ELASTICSEARCH_USERNAME` | 空 | 本地 ES 开启认证时填写 | |
 | `ELASTICSEARCH_PASSWORD` | 空 | 同上 | |
@@ -1308,6 +1312,35 @@ export function createExample(payload: { name: string }): Promise<ExampleItem> {
 - 接口目录由代码生成器（见 6.4）或手工 SQL 新增，默认 `status = 0`，必须经「API发布管理」上线。
 - 旧路由 `/console/admin/audit` 已更名为 `/console/admin/api`，页面组件仍是 `views/console/admin/api/Index.vue`。
 
+### 11.5 找回密码
+
+登录页底部的「忘记密码」入口打开申请弹窗：输入账号 → 人机校验与频控 → 如果账号存在，
+向注册邮箱发送带签名令牌的重置链接 → 用户打开 `/reset-password?token=...`，点击「验证重置链接」
+后才校验换票（避免邮件安全网关预取链接提前消耗令牌）→ 提交新密码。
+
+| 步骤 | 后端接口 | 说明 |
+|---|---|---|
+| 申请重置 | `POST /api/console/auth/forgot-password` | body `{ "account": "alice", "captchaToken": "..." }`；无论账号是否存在都返回成功 |
+| 校验令牌 | `POST /api/console/auth/reset-password/verify` | body `{ "token": "..." }`；返回 `ticket`（10 分钟一次性票据）与脱敏邮箱 |
+| 提交新密码 | `POST /api/console/auth/reset-password` | body `{ "ticket": "...", "newPassword": "..." }` |
+
+实现要点：
+
+- 令牌为「32 字节随机 nonce + HMAC-SHA256 签名」，数据库 `password_reset_token` 只存 SHA-256 哈希；
+  令牌校验通过即写入 `used_at`，不可重复换票。
+- 换发的票据绑定签发时的 `token_version`：重置成功后会话版本 +1，重置前换出的旧票据提交时因版本不匹配被拒绝，
+  无法二次重置密码。
+- 重置成功后 `sys_user.token_version + 1`，`JwtAuthInterceptor` 比对令牌里的 `ver` 声明与数据库版本，
+  所有历史 JWT 立即失效（前端会清掉本地令牌，需重新登录）。
+- 同一用户全部未使用的重置令牌一并作废；登录失败锁定计数同时清零，避免用户被旧密码爆破锁定挡住。
+- 申请接口的邮件发送在独立线程池异步执行，账号存在与不存在两条路径都不等待 SMTP，响应耗时一致，
+  避免通过时序差异枚举账号。
+- Redis 故障时的补偿：换票先写票据再消费令牌（Redis 不可用时令牌保持可用，可凭原链接重试）；
+  重置事务失败会把票据写回 Redis，用户无需重新走邮件流程。
+- 频控三层：控制台匿名接口每 IP 限流、找回密码申请每 IP 每分钟 5 次、同一 IP + 账号 15 分钟 3 次；
+  另有 60 秒邮件冷却与 Turnstile 人机校验。
+- 相关错误码：`40005` 重置链接无效或已过期、`40006` 重置票据失效、`42904` 请求过于频繁。
+
 ---
 
 ## 12. 本地联调与测试注意事项
@@ -1341,6 +1374,9 @@ export DB_PASSWORD=api_service_pass
 - `PermissionApiIntegrationTest` 断言接口市场只返回 **2** 个接口；向 H2 增加目录行会破坏该断言，需要同步修改测试预期。
 - H2 中 `api_endpoint_meta.status` 的建表默认值同样是 `0`；种子数据显式写 `1`。新增测试若插入目录行，需要显式设置期望的状态。
 - `PermissionApiIntegrationTest#shouldPublishAndOfflineEndpointWithUnifiedOfflineError` 会在事务内把接口 1001 下线再上线，方法结束回滚，不影响其他用例。
+- `PasswordResetApiIntegrationTest` 用 `@MockitoBean EmailService` 截获重置链接，覆盖“统一响应 + 只存哈希 + 换票 + 重置 + 旧 JWT 失效”全链路；
+  测试环境通过 `app.password-reset.resend-cooling-seconds=0` 关闭邮件冷却，便于连续申请；邮件由
+  `ResetMailDispatcher` 异步发送，断言需用 `verify(emailService, timeout(2000))` 等待调用到达。
 - `docs/schema.sql` 中的 1003–1005（个人日志、新闻搜索、IP 归属地）只存在于真实数据库脚本，不在 H2 中。
 - 限流基于 Redis 1 秒固定窗口；连续 MockMvc 调用低 `rateLimitQps` 的 Key 会返回 429，多调用测试请使用高 `rateLimitQps`。
 
@@ -1373,6 +1409,8 @@ export DB_PASSWORD=api_service_pass
 | `40105` 缺少令牌 | 后端仍是旧进程，或未携带 `Authorization` | 重启后端，检查前端 token |
 | `40404` 接口不存在 | `api_endpoint_meta` 缺少 `path + POST` 行 | 补目录行 |
 | `40305` API 已下线 | 接口 `status = 0`（未发布 / 被下线） | 在「API管理 → API发布管理」上线 |
+| `40005` 重置链接无效 | 链接超过 30 分钟、已被使用，或签发后账号密码又被重置过 | 重新在登录页申请找回密码 |
+| `40006` 重置会话失效 | 票据超过 10 分钟、已使用，或票据签发后密码已被重新重置 | 重新打开重置邮件中的新链接 |
 | 生成器提示“目标文件已存在” | 防覆盖保护 | 改用「修改已有接口」，或删除旧文件后重试 |
 | 新生成接口调用返回 `40400`/`40404` | Handler 未注册（未重启）或目录行缺失 | 重新编译重启后端，并确认 `api_endpoint_meta` 有该行 |
 | `40304` 无接口权限 | 缺少 `status=1` 的 `user_api_permission` | 提交申请并审批 |

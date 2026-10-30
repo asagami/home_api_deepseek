@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { ArrowRight, Key, Lock, Message, User } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
-import { sendEmailCode } from '@/api/auth'
+import { requestPasswordReset, sendEmailCode } from '@/api/auth'
 import { useCountdown } from '@/composables/useCountdown'
 import { useTurnstile } from '@/composables/useTurnstile'
 import { toErrorMessage } from '@/utils/error'
@@ -25,6 +25,18 @@ const loginForm = reactive({
   username: '',
   password: '',
 })
+
+// 找回密码弹窗
+const resetDialogVisible = ref(false)
+const resetSubmitting = ref(false)
+const resetSent = ref(false)
+const resetError = ref('')
+const resetFormRef = ref<FormInstance>()
+const resetForm = reactive({
+  account: '',
+})
+const resetCaptchaContainer = ref<HTMLElement | null>(null)
+const resetTurnstile = useTurnstile(resetCaptchaContainer)
 
 const registerForm = reactive({
   username: '',
@@ -48,6 +60,10 @@ const turnstile = useTurnstile(turnstileContainer)
 const loginRules: FormRules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
+}
+
+const resetRules: FormRules = {
+  account: [{ required: true, message: '请输入账号', trigger: 'blur' }],
 }
 
 const registerRules: FormRules = {
@@ -76,6 +92,48 @@ function switchMode(next: Mode): void {
   errorMessage.value = ''
   loginFormRef.value?.clearValidate()
   registerFormRef.value?.clearValidate()
+}
+
+function openResetDialog(): void {
+  resetForm.account = loginForm.username.trim()
+  resetError.value = ''
+  resetSent.value = false
+  resetDialogVisible.value = true
+}
+
+function handleResetDialogClosed(): void {
+  resetTurnstile.reset()
+  resetFormRef.value?.clearValidate()
+}
+
+async function handleRequestReset(): Promise<void> {
+  resetError.value = ''
+  if (!resetFormRef.value) {
+    return
+  }
+  const valid = await resetFormRef.value.validate().catch(() => false)
+  if (!valid) {
+    return
+  }
+  if (resetTurnstile.enabled && !resetTurnstile.token.value) {
+    resetError.value = '请先完成人机校验'
+    return
+  }
+
+  resetSubmitting.value = true
+  try {
+    await requestPasswordReset(
+      resetForm.account.trim(),
+      resetTurnstile.enabled ? resetTurnstile.token.value : undefined,
+    )
+    // 后端不区分账号是否存在，统一提示，避免账号枚举
+    resetSent.value = true
+  } catch (error) {
+    resetError.value = toErrorMessage(error)
+    resetTurnstile.reset()
+  } finally {
+    resetSubmitting.value = false
+  }
 }
 
 async function redirectAfterAuth(): Promise<void> {
@@ -383,9 +441,74 @@ async function handleRegister(): Promise<void> {
 
         <div class="form-footer">
           <RouterLink to="/health" class="footer-link">查看服务状态</RouterLink>
-          <span class="footer-hint">JWT 有效期 24 小时</span>
+          <button type="button" class="footer-link footer-button" @click="openResetDialog">
+            忘记密码
+          </button>
         </div>
       </div>
+
+      <el-dialog
+        v-model="resetDialogVisible"
+        title="找回密码"
+        width="min(420px, 92vw)"
+        append-to-body
+        :close-on-click-modal="false"
+        @closed="handleResetDialogClosed"
+      >
+        <template v-if="!resetSent">
+          <p class="reset-tip">
+            输入注册账号，我们会向账号绑定的邮箱发送重置链接。链接 30 分钟内有效，仅可使用一次。
+          </p>
+          <el-alert
+            v-if="resetError"
+            :title="resetError"
+            type="error"
+            :closable="false"
+            show-icon
+            class="form-alert"
+          />
+          <el-form
+            ref="resetFormRef"
+            :model="resetForm"
+            :rules="resetRules"
+            label-position="top"
+            @submit.prevent="handleRequestReset"
+          >
+            <el-form-item label="账号" prop="account">
+              <el-input
+                v-model="resetForm.account"
+                :prefix-icon="User"
+                placeholder="请输入用户名"
+                autocomplete="username"
+                clearable
+                @keyup.enter="handleRequestReset"
+              />
+            </el-form-item>
+            <el-form-item v-if="resetTurnstile.enabled" label="人机校验">
+              <div ref="resetCaptchaContainer" class="turnstile-box"></div>
+            </el-form-item>
+          </el-form>
+        </template>
+
+        <el-result
+          v-else
+          icon="success"
+          title="重置邮件已发出"
+          sub-title="如果该账号存在，我们已向注册邮箱发送重置链接。请检查收件箱和垃圾邮件。"
+        />
+
+        <template #footer>
+          <template v-if="!resetSent">
+            <el-button @click="resetDialogVisible = false">取消</el-button>
+            <el-button type="primary" :loading="resetSubmitting" @click="handleRequestReset">
+              发送重置邮件
+            </el-button>
+          </template>
+          <el-button v-else type="primary" @click="resetDialogVisible = false">
+            知道了
+          </el-button>
+        </template>
+      </el-dialog>
     </section>
   </div>
 </template>
@@ -633,8 +756,19 @@ async function handleRegister(): Promise<void> {
   text-decoration: underline;
 }
 
-.footer-hint {
-  color: #94a3b8;
+.footer-button {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.reset-tip {
+  margin: 0 0 1rem;
+  color: #64748b;
+  font-size: 0.85rem;
+  line-height: 1.65;
 }
 
 @media (max-width: 960px) {

@@ -97,7 +97,9 @@ public class AuthServiceImpl implements AuthService {
         // 登录成功，清除失败计数
         rateLimiter.reset(failBucket);
 
-        String token = jwtUtils.generateToken(user.getId(), user.getUsername(), user.getRole());
+        int tokenVersion = user.getTokenVersion() == null ? 0 : user.getTokenVersion();
+        String token = jwtUtils.generateToken(
+                user.getId(), user.getUsername(), user.getRole(), tokenVersion);
         return new LoginVO(token, "Bearer", jwtUtils.getExpirationMs());
     }
 

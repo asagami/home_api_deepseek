@@ -19,4 +19,13 @@ public interface EmailService {
      * @param code  用户提交的验证码
      */
     void verifyCode(String email, String code);
+
+    /**
+     * 发送密码重置邮件。
+     *
+     * @param email        接收邮箱
+     * @param resetUrl     带签名令牌的重置链接
+     * @param validMinutes 链接有效期（分钟）
+     */
+    void sendPasswordResetEmail(String email, String resetUrl, long validMinutes);
 }

@@ -16,6 +16,8 @@ public enum ErrorCode {
     RECHARGE_PACKAGE_INVALID(40002, "不支持的充值套餐档位", HttpStatus.BAD_REQUEST),
     PAY_CHANNEL_NOT_SUPPORTED(40003, "不支持的支付渠道", HttpStatus.BAD_REQUEST),
     CAPTCHA_VERIFY_FAILED(40004, "人机校验未通过，请重新完成校验", HttpStatus.BAD_REQUEST),
+    RESET_TOKEN_INVALID(40005, "重置链接无效或已过期", HttpStatus.BAD_REQUEST),
+    RESET_TICKET_INVALID(40006, "重置会话已失效，请重新发起找回密码", HttpStatus.BAD_REQUEST),
     UNAUTHORIZED(40100, "未认证或登录已过期", HttpStatus.UNAUTHORIZED),
     API_KEY_MISSING(40101, "缺少 API Key", HttpStatus.UNAUTHORIZED),
     API_KEY_INVALID(40102, "无效的 API Key", HttpStatus.UNAUTHORIZED),
@@ -51,6 +53,7 @@ public enum ErrorCode {
     EMAIL_CODE_SEND_TOO_FREQUENT(42901, "验证码发送过于频繁，请稍后再试", HttpStatus.TOO_MANY_REQUESTS),
     LOGIN_LOCKED(42902, "登录失败次数过多，请稍后再试", HttpStatus.TOO_MANY_REQUESTS),
     EMAIL_CODE_ATTEMPT_EXCEEDED(42903, "验证码错误次数过多，请重新获取", HttpStatus.TOO_MANY_REQUESTS),
+    PASSWORD_RESET_TOO_FREQUENT(42904, "找回密码请求过于频繁，请稍后再试", HttpStatus.TOO_MANY_REQUESTS),
     INTERNAL_ERROR(50000, "服务器内部错误", HttpStatus.INTERNAL_SERVER_ERROR),
     EMAIL_SEND_FAILED(50001, "验证码邮件发送失败，请稍后重试", HttpStatus.INTERNAL_SERVER_ERROR),
     UPSTREAM_ERROR(50400, "上游服务异常，请稍后重试", HttpStatus.GATEWAY_TIMEOUT);

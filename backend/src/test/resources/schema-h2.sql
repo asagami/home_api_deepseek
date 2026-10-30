@@ -2,6 +2,7 @@ DROP TABLE IF EXISTS recharge_order;
 DROP TABLE IF EXISTS user_api_permission;
 DROP TABLE IF EXISTS api_access_log;
 DROP TABLE IF EXISTS api_endpoint_meta;
+DROP TABLE IF EXISTS password_reset_token;
 DROP TABLE IF EXISTS api_key_info;
 DROP TABLE IF EXISTS sys_user;
 
@@ -13,12 +14,28 @@ CREATE TABLE sys_user (
     role VARCHAR(32) NOT NULL DEFAULT 'USER',
     balance_quota BIGINT NOT NULL DEFAULT 1000,
     status TINYINT NOT NULL DEFAULT 1,
+    token_version INT NOT NULL DEFAULT 0,
     create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     is_deleted TINYINT NOT NULL DEFAULT 0,
     PRIMARY KEY (id),
     CONSTRAINT uk_username UNIQUE (username)
 );
+
+CREATE TABLE password_reset_token (
+    id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    token_hash VARCHAR(64) NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    used_at TIMESTAMP,
+    request_ip VARCHAR(64),
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    CONSTRAINT uk_reset_token_hash UNIQUE (token_hash)
+);
+
+CREATE INDEX idx_reset_user ON password_reset_token (user_id);
 
 CREATE TABLE api_key_info (
     id BIGINT NOT NULL,

@@ -35,6 +35,9 @@ public class SysUser {
     /** 1-正常，0-封禁 */
     private Integer status;
 
+    /** 会话版本：密码重置时 +1，历史 JWT 全部失效 */
+    private Integer tokenVersion;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
 

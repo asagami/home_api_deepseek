@@ -29,6 +29,13 @@ export interface LoginResult {
   expiresIn: number
 }
 
+export interface ResetTokenVerifyResult {
+  /** 一次性 Reset Ticket，提交新密码时使用，仅保存在页面内存中 */
+  ticket: string
+  expiresInSeconds: number
+  maskedEmail: string
+}
+
 export function sendEmailCode(email: string, captchaToken?: string): Promise<void> {
   return consoleHttp.post<void>('/auth/send-email-code', { email, captchaToken })
 }
@@ -43,4 +50,19 @@ export function login(payload: LoginPayload): Promise<LoginResult> {
 
 export function getMe(): Promise<UserProfile> {
   return consoleHttp.get<UserProfile>('/auth/me')
+}
+
+/** 申请找回密码；无论账号是否存在，接口都返回成功，避免账号枚举 */
+export function requestPasswordReset(account: string, captchaToken?: string): Promise<void> {
+  return consoleHttp.post<void>('/auth/forgot-password', { account, captchaToken })
+}
+
+/** 校验邮件中的重置令牌，换取短期一次性票据 */
+export function verifyResetToken(token: string): Promise<ResetTokenVerifyResult> {
+  return consoleHttp.post<ResetTokenVerifyResult>('/auth/reset-password/verify', { token })
+}
+
+/** 使用一次性票据提交新密码 */
+export function resetPassword(ticket: string, newPassword: string): Promise<void> {
+  return consoleHttp.post<void>('/auth/reset-password', { ticket, newPassword })
 }
