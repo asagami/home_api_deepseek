@@ -3,10 +3,14 @@ package com.example.api_service.controller;
 import com.example.api_service.common.BusinessException;
 import com.example.api_service.common.ErrorCode;
 import com.example.api_service.common.Result;
+import com.example.api_service.model.dto.auth.ForgotPasswordRequest;
 import com.example.api_service.model.dto.auth.LoginRequest;
 import com.example.api_service.model.dto.auth.RegisterRequest;
+import com.example.api_service.model.dto.auth.ResetPasswordRequest;
+import com.example.api_service.model.dto.auth.ResetTokenVerifyRequest;
 import com.example.api_service.model.dto.auth.SendEmailCodeRequest;
 import com.example.api_service.model.vo.auth.LoginVO;
+import com.example.api_service.model.vo.auth.ResetTokenVerifyVO;
 import com.example.api_service.model.vo.auth.UserProfileVO;
 import com.example.api_service.security.ClientIpUtils;
 import com.example.api_service.security.RedisRateLimiter;
@@ -14,6 +18,7 @@ import com.example.api_service.security.TurnstileVerifier;
 import com.example.api_service.security.UserContext;
 import com.example.api_service.service.AuthService;
 import com.example.api_service.service.EmailService;
+import com.example.api_service.service.PasswordResetService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
@@ -36,6 +41,7 @@ public class AuthController {
 
     private final AuthService authService;
     private final EmailService emailService;
+    private final PasswordResetService passwordResetService;
     private final TurnstileVerifier turnstileVerifier;
     private final RedisRateLimiter rateLimiter;
     private final ClientIpUtils clientIpUtils;
@@ -43,6 +49,14 @@ public class AuthController {
     /** 发码接口独立的每 IP 分钟级上限，与控制台全局限流叠加，收紧邮件轰炸空间。 */
     @Value("${app.ratelimit.email-code.ip-per-minute:5}")
     private int emailCodeIpLimitPerMinute;
+
+    /** 找回密码申请接口的每 IP 分钟级上限 */
+    @Value("${app.ratelimit.password-reset.ip-per-minute:5}")
+    private int passwordResetIpLimitPerMinute;
+
+    /** 重置令牌校验与提交新密码接口的每 IP 分钟级上限 */
+    @Value("${app.ratelimit.password-reset.verify-ip-per-minute:20}")
+    private int passwordResetVerifyIpLimitPerMinute;
 
     @PostMapping("/send-email-code")
     @Operation(summary = "发送邮箱验证码",
@@ -73,6 +87,51 @@ public class AuthController {
     @Operation(summary = "登录", description = "校验用户名密码后签发 JWT")
     public Result<LoginVO> login(@Valid @RequestBody LoginRequest request) {
         return Result.success(authService.login(request));
+    }
+
+    @PostMapping("/forgot-password")
+    @Operation(summary = "找回密码",
+            description = "人机校验与频控通过后，如果账号存在则向注册邮箱发送重置链接；"
+                    + "响应不区分账号是否存在")
+    public Result<Void> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request,
+                                       HttpServletRequest httpRequest) {
+        String ip = clientIpUtils.resolve(httpRequest);
+        if (!rateLimiter.allowFixedWindow("console:password-reset:ip:" + ip,
+                passwordResetIpLimitPerMinute, Duration.ofMinutes(1))) {
+            throw new BusinessException(ErrorCode.PASSWORD_RESET_TOO_FREQUENT);
+        }
+
+        turnstileVerifier.verify(request.captchaToken(), ip);
+        passwordResetService.requestReset(request.account(), ip);
+        return Result.success();
+    }
+
+    @PostMapping("/reset-password/verify")
+    @Operation(summary = "校验重置令牌",
+            description = "签名与有效期校验通过后消费邮件令牌，返回短期一次性 Reset Ticket")
+    public Result<ResetTokenVerifyVO> verifyResetToken(
+            @Valid @RequestBody ResetTokenVerifyRequest request,
+            HttpServletRequest httpRequest) {
+        if (!rateLimiter.allowFixedWindow("console:password-reset:verify:ip:"
+                + clientIpUtils.resolve(httpRequest), passwordResetVerifyIpLimitPerMinute,
+                Duration.ofMinutes(1))) {
+            throw new BusinessException(ErrorCode.PASSWORD_RESET_TOO_FREQUENT);
+        }
+        return Result.success(passwordResetService.verifyToken(request.token()));
+    }
+
+    @PostMapping("/reset-password")
+    @Operation(summary = "提交新密码",
+            description = "使用一次性 Reset Ticket 更新密码，并踢出该账号全部历史登录会话")
+    public Result<Void> resetPassword(@Valid @RequestBody ResetPasswordRequest request,
+                                      HttpServletRequest httpRequest) {
+        if (!rateLimiter.allowFixedWindow("console:password-reset:verify:ip:"
+                + clientIpUtils.resolve(httpRequest), passwordResetVerifyIpLimitPerMinute,
+                Duration.ofMinutes(1))) {
+            throw new BusinessException(ErrorCode.PASSWORD_RESET_TOO_FREQUENT);
+        }
+        passwordResetService.resetPassword(request.ticket(), request.newPassword());
+        return Result.success();
     }
 
     @GetMapping("/me")

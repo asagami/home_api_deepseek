@@ -88,6 +88,30 @@ public class EmailServiceImpl implements EmailService {
     }
 
     @Override
+    public void sendPasswordResetEmail(String email, String resetUrl, long validMinutes) {
+        String target = email.trim();
+
+        SimpleMailMessage message = new SimpleMailMessage();
+        if (StringUtils.hasText(mailFrom)) {
+            message.setFrom(mailFrom);
+        }
+        message.setTo(target);
+        message.setSubject("【API Service】重置密码");
+        message.setText("您正在找回 API Service 账号密码，请在 " + validMinutes
+                + " 分钟内打开以下链接完成重置：\n\n"
+                + resetUrl
+                + "\n\n如果这不是您本人的操作，请忽略本邮件，您的密码不会被修改。");
+
+        try {
+            mailSender.send(message);
+        } catch (MailException ex) {
+            log.error("重置密码邮件发送失败: email={}", maskEmail(target), ex);
+            throw new BusinessException(ErrorCode.EMAIL_SEND_FAILED);
+        }
+        log.info("重置密码邮件已发送: email={}", maskEmail(target));
+    }
+
+    @Override
     public void verifyCode(String email, String code) {
         String target = email.trim();
         String codeKey = CODE_KEY_PREFIX + target;

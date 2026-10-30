@@ -32,7 +32,10 @@ public class ConsoleRateLimitInterceptor implements HandlerInterceptor {
     private static final Set<String> AUTH_PATHS = Set.of(
             "/api/console/auth/login",
             "/api/console/auth/register",
-            "/api/console/auth/send-email-code");
+            "/api/console/auth/send-email-code",
+            "/api/console/auth/forgot-password",
+            "/api/console/auth/reset-password",
+            "/api/console/auth/reset-password/verify");
 
     private final RedisRateLimiter rateLimiter;
     private final AuthResponseWriter responseWriter;

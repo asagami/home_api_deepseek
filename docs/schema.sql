@@ -10,12 +10,28 @@ CREATE TABLE `sys_user` (
     `role` VARCHAR(32) NOT NULL DEFAULT 'USER' COMMENT '角色: USER-普通开发者, ADMIN-管理员',
     `balance_quota` BIGINT NOT NULL DEFAULT 1000 COMMENT '账户剩余免费/充值调用总额度(次)',
     `status` TINYINT NOT NULL DEFAULT 1 COMMENT '状态: 1-正常, 0-封禁',
+    `token_version` INT NOT NULL DEFAULT 0 COMMENT '会话版本: 密码重置时+1, 历史 JWT 全部失效',
     `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     `is_deleted` TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除: 0-未删, 1-已删',
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_username` (`username`)
 ) ENGINE=InnoDB COMMENT='开发者用户表';
+
+-- 1.1 密码重置令牌表：只存令牌哈希，一次性使用
+CREATE TABLE IF NOT EXISTS `password_reset_token` (
+    `id` BIGINT NOT NULL COMMENT '主键ID (雪花算法)',
+    `user_id` BIGINT NOT NULL COMMENT '申请重置的用户ID',
+    `token_hash` VARCHAR(64) NOT NULL COMMENT 'SHA-256(令牌) 十六进制',
+    `expires_at` DATETIME NOT NULL COMMENT '令牌过期时间',
+    `used_at` DATETIME DEFAULT NULL COMMENT '校验换票时间, 非空表示已使用',
+    `request_ip` VARCHAR(64) DEFAULT NULL COMMENT '申请时的客户端IP',
+    `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_reset_token_hash` (`token_hash`),
+    KEY `idx_reset_user` (`user_id`)
+) ENGINE=InnoDB COMMENT='密码重置令牌表';
 
 -- 2. API Key 密钥管理表 (核心：不存明文，只存 Hash 与脱敏前缀)
 CREATE TABLE `api_key_info` (
@@ -168,3 +184,8 @@ ALTER TABLE `api_endpoint_meta`
 -- 新增接口默认下线，需管理员在「API 管理 → API 发布管理」中上线（改为 1）后才可调用
 ALTER TABLE `api_endpoint_meta`
     MODIFY COLUMN `status` TINYINT NOT NULL DEFAULT 0 COMMENT '状态: 1-上线, 0-已下线 (新增接口默认 0, 需管理员上线)';
+
+-- 密码找回：会话版本列（旧库补列；表结构由服务启动时自愈或本文件创建）
+ALTER TABLE `sys_user`
+    ADD COLUMN IF NOT EXISTS `token_version` INT NOT NULL DEFAULT 0
+    COMMENT '会话版本: 密码重置时+1, 历史 JWT 全部失效' AFTER `status`;

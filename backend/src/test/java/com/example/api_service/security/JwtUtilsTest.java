@@ -29,6 +29,13 @@ class JwtUtilsTest {
     }
 
     @Test
+    void shouldRoundTripTokenVersion() {
+        String token = jwtUtils.generateToken(7L, "bob", "USER", 3);
+
+        assertEquals(3, jwtUtils.parseToken(token).tokenVersion());
+    }
+
+    @Test
     void shouldRejectTamperedToken() {
         String token = jwtUtils.generateToken(42L, "alice", "USER");
 

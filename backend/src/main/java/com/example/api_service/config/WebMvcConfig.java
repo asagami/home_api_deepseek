@@ -53,7 +53,10 @@ public class WebMvcConfig implements WebMvcConfigurer {
                 .excludePathPatterns(
                         "/api/console/auth/register",
                         "/api/console/auth/login",
-                        "/api/console/auth/send-email-code")
+                        "/api/console/auth/send-email-code",
+                        "/api/console/auth/forgot-password",
+                        "/api/console/auth/reset-password",
+                        "/api/console/auth/reset-password/verify")
                 .order(1);
 
         // 必须在 JWT 拦截器之后，才能读取 UserContext 中的角色

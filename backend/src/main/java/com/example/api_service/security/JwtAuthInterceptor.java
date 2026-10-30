@@ -65,6 +65,14 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
             return false;
         }
 
+        // 会话版本不一致说明密码已被重置，历史令牌全部作废
+        int tokenVersion = claims.tokenVersion() == null ? 0 : claims.tokenVersion();
+        int currentVersion = user.getTokenVersion() == null ? 0 : user.getTokenVersion();
+        if (tokenVersion != currentVersion) {
+            responseWriter.write(response, ErrorCode.TOKEN_INVALID, "访问令牌已失效，请重新登录");
+            return false;
+        }
+
         UserContext.set(new UserPrincipal(user.getId(), user.getUsername(), user.getRole()));
         return true;
     }
