@@ -34,8 +34,20 @@ public class RechargeOrder {
     /** 到账总点数（基础点数 + 赠送点数） */
     private Long totalPoints;
 
-    /** 支付渠道：ALIPAY / WECHAT */
+    /** 支付渠道：ALIPAY / WECHAT；管理员充值为 ADMIN */
     private String payChannel;
+
+    /** 订单来源：1-用户支付，2-管理员直接充值，见 RechargeOrderSource */
+    private Integer source;
+
+    /** 管理员充值时的操作人 ID，用户支付为空 */
+    private Long operatorId;
+
+    /** 操作人用户名快照，便于管理员账号变更后仍可审计 */
+    private String operatorName;
+
+    /** 充值原因/备注，用户支付为空 */
+    private String remark;
 
     /** 0-待支付，1-已支付，2-已关闭 */
     private Integer status;

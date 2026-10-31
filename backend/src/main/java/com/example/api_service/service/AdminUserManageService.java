@@ -1,6 +1,8 @@
 package com.example.api_service.service;
 
 import com.example.api_service.common.PageResult;
+import com.example.api_service.model.vo.admin.AdminRechargeOrderVO;
+import com.example.api_service.model.vo.admin.AdminRechargeQuotaVO;
 import com.example.api_service.model.vo.admin.AdminUserVO;
 
 public interface AdminUserManageService {
@@ -16,7 +18,18 @@ public interface AdminUserManageService {
     void updateStatus(Long operatorId, Long userId, Integer status);
 
     /**
-     * 为用户追加额度，返回更新后的用户信息。
+     * 管理员为用户直接充值：写充值流水、扣减月度限额并加点，返回更新后的用户信息。
      */
-    AdminUserVO recharge(Long userId, long amount);
+    AdminUserVO recharge(Long operatorId, Long userId, long amount, String remark);
+
+    /**
+     * 查询当前管理员本月对指定账号的充值额度使用情况。
+     */
+    AdminRechargeQuotaVO quotaUsage(Long operatorId, Long userId);
+
+    /**
+     * 分页查询指定用户的充值/发放记录（管理员视角）。
+     */
+    PageResult<AdminRechargeOrderVO> rechargeOrders(Long userId, long page, long size,
+                                                    Integer source, Integer status);
 }

@@ -1,3 +1,4 @@
+DROP TABLE IF EXISTS admin_recharge_monthly_usage;
 DROP TABLE IF EXISTS recharge_order;
 DROP TABLE IF EXISTS user_api_permission;
 DROP TABLE IF EXISTS api_access_log;
@@ -120,6 +121,10 @@ CREATE TABLE recharge_order (
     amount_fen INT NOT NULL,
     total_points BIGINT NOT NULL,
     pay_channel VARCHAR(16) NOT NULL,
+    source TINYINT NOT NULL DEFAULT 1,
+    operator_id BIGINT,
+    operator_name VARCHAR(64),
+    remark VARCHAR(255),
     status TINYINT NOT NULL DEFAULT 0,
     qr_code_url VARCHAR(512),
     trade_no VARCHAR(64),
@@ -133,6 +138,19 @@ CREATE TABLE recharge_order (
 );
 
 CREATE INDEX idx_recharge_user_status ON recharge_order (user_id, status, create_time);
+CREATE INDEX idx_source_time ON recharge_order (source, create_time);
+
+CREATE TABLE admin_recharge_monthly_usage (
+    id BIGINT NOT NULL,
+    operator_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    month_key VARCHAR(7) NOT NULL,
+    granted_points BIGINT NOT NULL DEFAULT 0,
+    create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    CONSTRAINT uk_admin_recharge_month UNIQUE (operator_id, user_id, month_key)
+);
 
 -- 集成测试使用的接口目录；ID 固定便于测试授权
 INSERT INTO api_endpoint_meta (id, name, path, method, cost_per_call, description, status, is_deleted)

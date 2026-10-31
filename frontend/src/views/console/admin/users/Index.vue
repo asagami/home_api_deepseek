@@ -1,14 +1,19 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Coin, Refresh, Search } from '@element-plus/icons-vue'
+import { Coin, Refresh, Search, Tickets } from '@element-plus/icons-vue'
 import {
+  getAdminRechargeQuota,
   listAdminUsers,
+  listUserRechargeOrders,
   rechargeUserQuota,
   updateUserStatus,
+  type AdminRechargeOrderItem,
+  type AdminRechargeQuota,
   type AdminUserItem,
   type UserStatus,
 } from '@/api/adminUsers'
+import { usePagination } from '@/composables/usePagination'
 import { toErrorMessage } from '@/utils/error'
 import { useAuthStore } from '@/stores/auth'
 
@@ -31,11 +36,72 @@ const statusFilter = ref<'' | '0' | '1'>('')
 const rechargeVisible = ref(false)
 const rechargeTarget = ref<AdminUserItem | null>(null)
 const rechargeAmount = ref(1000)
+const rechargeRemark = ref('')
 const recharging = ref(false)
+
+const targetQuota = ref<AdminRechargeQuota | null>(null)
+const quotaTargetId = ref<string | null>(null)
+const quotaLoading = ref(false)
+const quotaError = ref('')
+
+const recordsVisible = ref(false)
+const recordsTarget = ref<AdminUserItem | null>(null)
+const recordsSource = ref<'' | '1' | '2'>('')
+
+const {
+  records: rechargeRecords,
+  total: rechargeRecordsTotal,
+  pageNum: rechargeRecordsPage,
+  pageSize: rechargeRecordsPageSize,
+  pageSizes: rechargeRecordsPageSizes,
+  loading: rechargeRecordsLoading,
+  search: searchRechargeRecords,
+  handleCurrentChange: handleRechargeRecordsPageChange,
+  handleSizeChange: handleRechargeRecordsSizeChange,
+} = usePagination<AdminRechargeOrderItem, { source?: 1 | 2 }>(
+  (query) => {
+    const target = recordsTarget.value
+    if (!target) {
+      return Promise.resolve({ total: 0, pageNum: 1, pageSize: 10, records: [] })
+    }
+    return listUserRechargeOrders(target.id, query)
+  },
+  () => ({
+    source: recordsSource.value === '' ? undefined : (Number(recordsSource.value) as 1 | 2),
+  }),
+  {
+    pageSize: 10,
+    onError: (error) => ElMessage.error(toErrorMessage(error)),
+  },
+)
 
 const previewQuota = computed(
   () => (rechargeTarget.value?.balanceQuota ?? 0) + (rechargeAmount.value || 0),
 )
+
+const maxRechargeAmount = computed(() => {
+  if (targetQuota.value) {
+    return Math.max(1, targetQuota.value.remaining)
+  }
+  return 10_000_000
+})
+
+const rechargeBlocked = computed(
+  () => quotaLoading.value || (targetQuota.value !== null && targetQuota.value.remaining <= 0),
+)
+
+const quotaAlertType = computed<'info' | 'warning' | 'error'>(() => {
+  if (!targetQuota.value) {
+    return 'info'
+  }
+  if (targetQuota.value.remaining <= 0) {
+    return 'error'
+  }
+  if (targetQuota.value.remaining < 1000) {
+    return 'warning'
+  }
+  return 'info'
+})
 
 onMounted(() => {
   void loadUsers()
@@ -123,7 +189,37 @@ async function handleStatusChange(
 function openRecharge(row: AdminUserItem): void {
   rechargeTarget.value = row
   rechargeAmount.value = 1000
+  rechargeRemark.value = ''
+  targetQuota.value = null
+  quotaError.value = ''
   rechargeVisible.value = true
+  void loadTargetQuota(row.id)
+}
+
+async function loadTargetQuota(id: string): Promise<void> {
+  quotaTargetId.value = id
+  quotaLoading.value = true
+  quotaError.value = ''
+  targetQuota.value = null
+  try {
+    const quota = await getAdminRechargeQuota(id)
+    if (quotaTargetId.value !== id) {
+      return
+    }
+    targetQuota.value = quota
+    if (quota.remaining > 0) {
+      rechargeAmount.value = Math.min(rechargeAmount.value, quota.remaining)
+    }
+  } catch (error) {
+    if (quotaTargetId.value !== id) {
+      return
+    }
+    quotaError.value = toErrorMessage(error)
+  } finally {
+    if (quotaTargetId.value === id) {
+      quotaLoading.value = false
+    }
+  }
 }
 
 async function submitRecharge(): Promise<void> {
@@ -131,29 +227,67 @@ async function submitRecharge(): Promise<void> {
   if (!target) {
     return
   }
-  if (!Number.isFinite(rechargeAmount.value) || rechargeAmount.value <= 0) {
-    ElMessage.warning('充值额度必须大于 0')
+  if (
+    !Number.isInteger(rechargeAmount.value) ||
+    !Number.isFinite(rechargeAmount.value) ||
+    rechargeAmount.value <= 0
+  ) {
+    ElMessage.warning('充值额度必须为正整数')
+    return
+  }
+  if (targetQuota.value && rechargeAmount.value > targetQuota.value.remaining) {
+    ElMessage.warning(
+      `本月剩余额度不足，最多还能充值 ${formatNumber(targetQuota.value.remaining)} 点`,
+    )
     return
   }
 
   recharging.value = true
   try {
     const amount = rechargeAmount.value
-    const updated = await rechargeUserQuota(target.id, amount)
+    const updated = await rechargeUserQuota(target.id, amount, rechargeRemark.value)
     const index = users.value.findIndex((item) => item.id === updated.id)
     if (index >= 0) {
       users.value[index] = updated
     }
+    if (targetQuota.value) {
+      targetQuota.value = {
+        ...targetQuota.value,
+        used: targetQuota.value.used + amount,
+        remaining: Math.max(0, targetQuota.value.remaining - amount),
+      }
+    }
     rechargeVisible.value = false
-    ElMessage.success(`已为 ${updated.username} 充值 ${amount.toLocaleString('zh-CN')} 次`)
+    const remainingText = targetQuota.value
+      ? `，本月剩余 ${formatNumber(targetQuota.value.remaining)} 点`
+      : ''
+    ElMessage.success(`已为 ${updated.username} 充值 ${formatNumber(amount)} 点${remainingText}`)
     if (auth.user?.id === updated.id) {
       await auth.fetchMe().catch(() => null)
     }
+    if (recordsVisible.value && recordsTarget.value?.id === updated.id) {
+      searchRechargeRecords()
+    }
   } catch (error) {
     ElMessage.error(toErrorMessage(error))
+    void loadTargetQuota(target.id)
   } finally {
     recharging.value = false
   }
+}
+
+function openRecords(row: AdminUserItem): void {
+  recordsTarget.value = row
+  recordsSource.value = ''
+  recordsVisible.value = true
+  targetQuota.value = null
+  quotaError.value = ''
+  void loadTargetQuota(row.id)
+  searchRechargeRecords()
+}
+
+function handleRecordsSourceChange(): void {
+  searchRechargeRecords()
 }
 
 function formatNumber(value: number | null | undefined): string {
@@ -170,6 +304,20 @@ function formatTime(value: string | null): string {
   }
   return date.toLocaleString('zh-CN', { hour12: false })
 }
+
+function formatYuan(fen: number | null | undefined): string {
+  return (Number(fen ?? 0) / 100).toFixed(2)
+}
+
+function orderStatusType(status: number): 'success' | 'warning' | 'info' {
+  if (status === 1) {
+    return 'success'
+  }
+  if (status === 0) {
+    return 'warning'
+  }
+  return 'info'
+}
 </script>
 
 <template>
@@ -179,7 +327,8 @@ function formatTime(value: string | null): string {
         <h2>用户管理</h2>
         <p>
           管理开发者账号的访问状态与调用额度。封禁会立即阻止该用户登录控制台，
-          其名下 API Key 也会在下次调用时被拒绝；额度充值为原子追加，不会覆盖已有余额。
+          其名下 API Key 也会在下次调用时被拒绝；管理员充值会生成可审计的发放流水，
+          默认每名管理员对同一账号每个自然月最多充值 5,000 点。
         </p>
       </div>
       <el-button :icon="Refresh" :loading="loading" @click="loadUsers">刷新</el-button>
@@ -269,10 +418,13 @@ function formatTime(value: string | null): string {
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column label="操作" width="210" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" :icon="Coin" @click="openRecharge(row)">
               充值额度
+            </el-button>
+            <el-button link type="primary" :icon="Tickets" @click="openRecords(row)">
+              充值记录
             </el-button>
           </template>
         </el-table-column>
@@ -294,8 +446,8 @@ function formatTime(value: string | null): string {
 
     <el-dialog
       v-model="rechargeVisible"
-      title="额度充值"
-      width="460px"
+      title="管理员充值"
+      width="520px"
       :close-on-click-modal="false"
     >
       <template v-if="rechargeTarget">
@@ -309,37 +461,229 @@ function formatTime(value: string | null): string {
           </div>
         </div>
 
+        <el-alert
+          v-if="quotaLoading"
+          type="info"
+          :closable="false"
+          show-icon
+          class="quota-alert"
+        >
+          正在获取本月充值额度…
+        </el-alert>
+        <el-alert
+          v-else-if="targetQuota"
+          :type="quotaAlertType"
+          :closable="false"
+          show-icon
+          class="quota-alert"
+        >
+          本月您已为该账号充值
+          <strong>{{ formatNumber(targetQuota.used) }}</strong> /
+          {{ formatNumber(targetQuota.limit) }} 点，剩余
+          <strong>{{ formatNumber(targetQuota.remaining) }}</strong> 点
+        </el-alert>
+        <el-alert
+          v-else-if="quotaError"
+          type="warning"
+          :closable="false"
+          show-icon
+          class="quota-alert"
+        >
+          本月额度获取失败：{{ quotaError }}。提交时仍会由服务端校验上限。
+        </el-alert>
+
         <div class="amount-field">
           <label class="field-label">追加额度</label>
           <el-input-number
             v-model="rechargeAmount"
             :min="1"
-            :max="10000000"
+            :max="maxRechargeAmount"
             :step="100"
+            :disabled="rechargeBlocked"
             controls-position="right"
             class="amount-input"
           />
-          <span class="field-hint">单次最多 1000 万次</span>
+          <span class="field-hint">每自然月对同一账号有充值上限</span>
         </div>
 
         <el-radio-group v-model="rechargeAmount" class="quick-amounts">
-          <el-radio-button v-for="amount in QUICK_AMOUNTS" :key="amount" :value="amount">
+          <el-radio-button
+            v-for="amount in QUICK_AMOUNTS"
+            :key="amount"
+            :value="amount"
+            :disabled="rechargeBlocked || (targetQuota !== null && amount > targetQuota.remaining)"
+          >
             +{{ amount.toLocaleString('zh-CN') }}
           </el-radio-button>
         </el-radio-group>
 
-        <el-alert type="info" :closable="false" show-icon class="preview-alert">
+        <div class="remark-field">
+          <label class="field-label">备注</label>
+          <el-input
+            v-model="rechargeRemark"
+            type="textarea"
+            :rows="2"
+            maxlength="255"
+            show-word-limit
+            placeholder="选填：充值原因、工单号或活动说明"
+          />
+        </div>
+
+        <el-alert
+          v-if="targetQuota && targetQuota.remaining <= 0"
+          type="error"
+          :closable="false"
+          show-icon
+          class="preview-alert"
+        >
+          本月额度已用完，下个自然月恢复；当前操作已禁用。
+        </el-alert>
+        <el-alert v-else type="info" :closable="false" show-icon class="preview-alert">
           充值后剩余额度：{{ formatNumber(previewQuota) }} 次
         </el-alert>
       </template>
 
       <template #footer>
         <el-button @click="rechargeVisible = false">取消</el-button>
-        <el-button type="primary" :loading="recharging" @click="submitRecharge">
+        <el-button
+          type="primary"
+          :loading="recharging"
+          :disabled="rechargeBlocked"
+          @click="submitRecharge"
+        >
           确认充值
         </el-button>
       </template>
     </el-dialog>
+
+    <el-drawer
+      v-model="recordsVisible"
+      :title="recordsTarget ? `${recordsTarget.username} 的充值记录` : '充值记录'"
+      size="820px"
+    >
+      <div class="records-body">
+        <el-alert
+          v-if="quotaLoading"
+          type="info"
+          :closable="false"
+          show-icon
+        >
+          正在获取本月充值额度…
+        </el-alert>
+        <el-alert
+          v-else-if="targetQuota"
+          :type="quotaAlertType"
+          :closable="false"
+          show-icon
+        >
+          本月您已为该账号充值
+          <strong>{{ formatNumber(targetQuota.used) }}</strong> /
+          {{ formatNumber(targetQuota.limit) }} 点，剩余
+          <strong>{{ formatNumber(targetQuota.remaining) }}</strong> 点
+        </el-alert>
+        <el-alert
+          v-else-if="quotaError"
+          type="warning"
+          :closable="false"
+          show-icon
+        >
+          本月额度获取失败：{{ quotaError }}
+        </el-alert>
+
+        <div class="records-filter">
+          <el-select
+            v-model="recordsSource"
+            placeholder="全部来源"
+            class="source-select"
+            @change="handleRecordsSourceChange"
+          >
+            <el-option label="全部来源" value="" />
+            <el-option label="用户充值" value="1" />
+            <el-option label="管理员发放" value="2" />
+          </el-select>
+          <el-button
+            :icon="Refresh"
+            :loading="rechargeRecordsLoading"
+            @click="searchRechargeRecords"
+          >
+            刷新
+          </el-button>
+        </div>
+
+        <el-table
+          v-loading="rechargeRecordsLoading"
+          :data="rechargeRecords"
+          stripe
+          empty-text="暂无充值记录"
+        >
+          <el-table-column label="时间" width="160">
+            <template #default="{ row }">
+              <span class="time-text">{{ formatTime(row.payTime ?? row.createTime) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="订单号" min-width="190">
+            <template #default="{ row }">
+              <code class="order-code">{{ row.orderNo }}</code>
+            </template>
+          </el-table-column>
+          <el-table-column label="来源" width="110">
+            <template #default="{ row }">
+              <el-tag
+                :type="row.source === 2 ? 'warning' : 'info'"
+                effect="light"
+                round
+                size="small"
+              >
+                {{ row.sourceDesc }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="点数" width="100">
+            <template #default="{ row }">
+              <span class="points-text">+{{ formatNumber(row.totalPoints) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="金额" width="90">
+            <template #default="{ row }">
+              <span v-if="row.source === 2" class="muted-text">—</span>
+              <span v-else class="money-text">¥ {{ formatYuan(row.amountFen) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="100">
+            <template #default="{ row }">
+              <el-tag :type="orderStatusType(row.status)" effect="light" round size="small">
+                {{ row.statusDesc }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作人" width="120">
+            <template #default="{ row }">
+              {{ row.operatorName ?? '—' }}
+            </template>
+          </el-table-column>
+          <el-table-column label="备注" min-width="150">
+            <template #default="{ row }">
+              <span class="remark-text" :title="row.remark ?? undefined">
+                {{ row.remark ?? '—' }}
+              </span>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <div class="pagination-row">
+          <el-pagination
+            background
+            layout="total, sizes, prev, pager, next"
+            :total="rechargeRecordsTotal"
+            :page-size="rechargeRecordsPageSize"
+            :current-page="rechargeRecordsPage"
+            :page-sizes="rechargeRecordsPageSizes"
+            @current-change="handleRechargeRecordsPageChange"
+            @size-change="handleRechargeRecordsSizeChange"
+          />
+        </div>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -538,6 +882,62 @@ function formatTime(value: string | null): string {
 
 .preview-alert {
   margin-top: 1.1rem;
+}
+
+.quota-alert {
+  margin-bottom: 1rem;
+}
+
+.remark-field {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 1rem;
+}
+
+.records-body {
+  display: grid;
+  gap: 1rem;
+}
+
+.records-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.source-select {
+  width: 150px;
+}
+
+.order-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.74rem;
+  color: #475569;
+}
+
+.points-text {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #4338ca;
+}
+
+.money-text {
+  font-size: 0.8rem;
+  color: #0f172a;
+}
+
+.muted-text {
+  color: #94a3b8;
+}
+
+.remark-text {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 0.78rem;
+  color: #475569;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 720px) {

@@ -4,10 +4,13 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.api_service.common.BusinessException;
 import com.example.api_service.common.ErrorCode;
 import com.example.api_service.common.PageResult;
-import com.example.api_service.engine.billing.QuotaLedger;
 import com.example.api_service.model.entity.SysUser;
+import com.example.api_service.model.vo.admin.AdminRechargeOrderVO;
+import com.example.api_service.model.vo.admin.AdminRechargeQuotaVO;
 import com.example.api_service.model.vo.admin.AdminUserVO;
+import com.example.api_service.service.AdminRechargeLimitService;
 import com.example.api_service.service.AdminUserManageService;
+import com.example.api_service.service.RechargeService;
 import com.example.api_service.service.SysUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -23,7 +26,8 @@ public class AdminUserManageServiceImpl implements AdminUserManageService {
     private static final int STATUS_BANNED = 0;
 
     private final SysUserService sysUserService;
-    private final QuotaLedger quotaLedger;
+    private final RechargeService rechargeService;
+    private final AdminRechargeLimitService adminRechargeLimitService;
 
     @Override
     public PageResult<AdminUserVO> list(long page, long size, String keyword, Integer status) {
@@ -60,12 +64,22 @@ public class AdminUserManageServiceImpl implements AdminUserManageService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public AdminUserVO recharge(Long userId, long amount) {
-        getExistingUser(userId);
-        if (!quotaLedger.credit(userId, amount, true)) {
-            throw new BusinessException(ErrorCode.USER_NOT_FOUND);
-        }
+    public AdminUserVO recharge(Long operatorId, Long userId, long amount, String remark) {
+        rechargeService.grantByAdmin(operatorId, userId, amount, remark);
         return AdminUserVO.from(getExistingUser(userId));
+    }
+
+    @Override
+    public AdminRechargeQuotaVO quotaUsage(Long operatorId, Long userId) {
+        getExistingUser(userId);
+        return adminRechargeLimitService.usage(operatorId, userId);
+    }
+
+    @Override
+    public PageResult<AdminRechargeOrderVO> rechargeOrders(Long userId, long page, long size,
+                                                           Integer source, Integer status) {
+        getExistingUser(userId);
+        return rechargeService.pageOrdersForAdmin(userId, page, size, source, status);
     }
 
     private SysUser getExistingUser(Long userId) {
