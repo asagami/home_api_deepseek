@@ -5,9 +5,11 @@ import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { ArrowRight, Key, Lock, Message, User } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { requestPasswordReset, sendEmailCode } from '@/api/auth'
+import PasswordStrengthMeter from '@/components/PasswordStrengthMeter.vue'
 import { useCountdown } from '@/composables/useCountdown'
 import { useTurnstile } from '@/composables/useTurnstile'
 import { toErrorMessage } from '@/utils/error'
+import { analyzePassword } from '@/utils/passwordStrength'
 
 type Mode = 'login' | 'register'
 
@@ -66,6 +68,23 @@ const resetRules: FormRules = {
   account: [{ required: true, message: '请输入账号', trigger: 'blur' }],
 }
 
+function validateRegisterPassword(
+  _rule: unknown,
+  value: string,
+  callback: (error?: string | Error) => void,
+): void {
+  if (!value) {
+    callback()
+    return
+  }
+  const analysis = analyzePassword(value, registerForm.username)
+  if (!analysis.acceptable) {
+    callback(new Error(analysis.message))
+    return
+  }
+  callback()
+}
+
 const registerRules: FormRules = {
   username: [
     { required: true, message: '请输入用户名', trigger: 'blur' },
@@ -82,7 +101,7 @@ const registerRules: FormRules = {
   ],
   password: [
     { required: true, message: '请输入密码', trigger: 'blur' },
-    { min: 8, max: 64, message: '密码长度需在 8-64 之间', trigger: 'blur' },
+    { validator: validateRegisterPassword, trigger: 'blur' },
   ],
   confirmPassword: [{ required: true, message: '请再次输入密码', trigger: 'blur' }],
 }
@@ -412,8 +431,12 @@ async function handleRegister(): Promise<void> {
               :prefix-icon="Lock"
               type="password"
               show-password
-              placeholder="至少 8 位"
+              placeholder="至少 8 位，包含大小写字母和数字"
               autocomplete="new-password"
+            />
+            <PasswordStrengthMeter
+              :password="registerForm.password"
+              :username="registerForm.username"
             />
           </el-form-item>
           <el-form-item label="确认密码" prop="confirmPassword">
@@ -732,6 +755,10 @@ async function handleRegister(): Promise<void> {
 
 .turnstile-box {
   width: 100%;
+}
+
+:deep(.el-form-item__content) {
+  flex-wrap: wrap;
 }
 
 .submit-button {

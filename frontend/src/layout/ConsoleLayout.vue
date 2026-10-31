@@ -11,6 +11,7 @@ import {
   Fold,
   Goods,
   Key,
+  Lock,
   Money,
   Monitor,
   Refresh,
@@ -20,6 +21,7 @@ import {
   Wallet,
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
+import ChangePasswordDialog from '@/components/ChangePasswordDialog.vue'
 
 const COLLAPSE_STORAGE_KEY = 'console:sidebar-collapsed'
 
@@ -28,6 +30,7 @@ const router = useRouter()
 const auth = useAuthStore()
 
 const collapsed = ref(localStorage.getItem(COLLAPSE_STORAGE_KEY) === 'true')
+const changePasswordVisible = ref(false)
 
 const pageTitle = computed(() => route.meta.title ?? '控制台')
 const userInitial = computed(() => auth.user?.username.slice(0, 1).toUpperCase() ?? 'U')
@@ -56,6 +59,8 @@ function refreshProfile(): void {
 function handleUserCommand(command: string | number | object): void {
   if (command === 'logout') {
     handleLogout()
+  } else if (command === 'change-password') {
+    changePasswordVisible.value = true
   }
 }
 
@@ -220,6 +225,9 @@ function handleLogout(): void {
                     <span class="user-menu-name">{{ auth.user?.username ?? '未登录' }}</span>
                     <el-tag size="small" effect="plain" round>{{ auth.user?.role ?? 'USER' }}</el-tag>
                   </div>
+                  <el-dropdown-item command="change-password" :icon="Lock">
+                    修改密码
+                  </el-dropdown-item>
                   <el-dropdown-item command="logout" :icon="SwitchButton" divided>退出登录</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
@@ -236,6 +244,8 @@ function handleLogout(): void {
         </RouterView>
       </main>
     </div>
+
+    <ChangePasswordDialog v-model="changePasswordVisible" />
   </div>
 </template>
 

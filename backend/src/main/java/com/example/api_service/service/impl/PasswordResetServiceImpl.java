@@ -7,6 +7,7 @@ import com.example.api_service.mapper.PasswordResetTokenMapper;
 import com.example.api_service.model.entity.PasswordResetToken;
 import com.example.api_service.model.entity.SysUser;
 import com.example.api_service.model.vo.auth.ResetTokenVerifyVO;
+import com.example.api_service.security.PasswordPolicy;
 import com.example.api_service.security.RedisRateLimiter;
 import com.example.api_service.security.ResetTokenCodec;
 import com.example.api_service.service.PasswordResetService;
@@ -182,7 +183,12 @@ public class PasswordResetServiceImpl implements PasswordResetService {
         try {
             applyReset(issued, newPassword);
         } catch (BusinessException ex) {
-            // 业务拒绝（版本过期、账号不可用等）属于永久失效，票据不应写回
+            if (ex.getErrorCode() == ErrorCode.WEAK_PASSWORD
+                    || ex.getErrorCode() == ErrorCode.PASSWORD_SAME_AS_OLD) {
+                // 密码不合规属于可修正的输入错误，票据放回 Redis 允许用户重试
+                restoreTicket(ticket, issued);
+            }
+            // 其余业务拒绝（版本过期、账号不可用等）属于永久失效，票据不应写回
             throw ex;
         } catch (RuntimeException ex) {
             // 事务回滚后密码并未改变，把票据放回 Redis，用户可凭同一票据重试，
@@ -201,6 +207,12 @@ public class PasswordResetServiceImpl implements PasswordResetService {
         // 会话版本已递增说明密码在此期间已被重置过，重置前换出的票据一律作废
         if (issued.tokenVersion() != currentVersion) {
             throw new BusinessException(ErrorCode.RESET_TICKET_INVALID);
+        }
+
+        // 新密码沿用统一强度策略；同密码与弱密码都允许用户凭同一票据重试
+        PasswordPolicy.validate(user.getUsername(), newPassword);
+        if (passwordEncoder.matches(newPassword, user.getPasswordHash())) {
+            throw new BusinessException(ErrorCode.PASSWORD_SAME_AS_OLD);
         }
 
         boolean updated = sysUserService.lambdaUpdate()

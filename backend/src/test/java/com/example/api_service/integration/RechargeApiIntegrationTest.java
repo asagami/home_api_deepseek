@@ -35,7 +35,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class RechargeApiIntegrationTest {
 
     private static final String AUTH_HEADER = "Authorization";
-    private static final String PASSWORD = "password123";
+    private static final String PASSWORD = "Str0ngPass2026";
 
     @Autowired
     private MockMvc mockMvc;

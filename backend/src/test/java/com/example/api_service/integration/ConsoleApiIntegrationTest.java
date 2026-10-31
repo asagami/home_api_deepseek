@@ -47,7 +47,7 @@ class ConsoleApiIntegrationTest {
 
     private static final String AUTH_HEADER = "Authorization";
     private static final String API_KEY_HEADER = "X-API-Key";
-    private static final String PASSWORD = "password123";
+    private static final String PASSWORD = "Str0ngPass2026";
 
     @Autowired
     private MockMvc mockMvc;

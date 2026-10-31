@@ -3,6 +3,7 @@ package com.example.api_service.controller;
 import com.example.api_service.common.BusinessException;
 import com.example.api_service.common.ErrorCode;
 import com.example.api_service.common.Result;
+import com.example.api_service.model.dto.auth.ChangePasswordRequest;
 import com.example.api_service.model.dto.auth.ForgotPasswordRequest;
 import com.example.api_service.model.dto.auth.LoginRequest;
 import com.example.api_service.model.dto.auth.RegisterRequest;
@@ -57,6 +58,10 @@ public class AuthController {
     /** 重置令牌校验与提交新密码接口的每 IP 分钟级上限 */
     @Value("${app.ratelimit.password-reset.verify-ip-per-minute:20}")
     private int passwordResetVerifyIpLimitPerMinute;
+
+    /** 修改密码接口每 IP 每 15 分钟上限，防止同一来源轮换账号试错 */
+    @Value("${app.ratelimit.password-change.ip-per-15-minutes:10}")
+    private int passwordChangeIpLimitPer15Minutes;
 
     @PostMapping("/send-email-code")
     @Operation(summary = "发送邮箱验证码",
@@ -138,5 +143,19 @@ public class AuthController {
     @Operation(summary = "当前用户信息", description = "返回当前登录用户信息与剩余额度")
     public Result<UserProfileVO> me() {
         return Result.success(authService.getProfile(UserContext.getUserId()));
+    }
+
+    @PostMapping("/change-password")
+    @Operation(summary = "修改密码",
+            description = "校验旧密码与新密码强度后更新密码并递增会话版本；"
+                    + "返回当前设备的新令牌，其他设备的历史登录全部失效")
+    public Result<LoginVO> changePassword(@Valid @RequestBody ChangePasswordRequest request,
+                                          HttpServletRequest httpRequest) {
+        String ip = clientIpUtils.resolve(httpRequest);
+        if (!rateLimiter.allowFixedWindow("console:password-change:ip:" + ip,
+                passwordChangeIpLimitPer15Minutes, Duration.ofMinutes(15))) {
+            throw new BusinessException(ErrorCode.TOO_MANY_REQUESTS, "修改密码请求过于频繁，请稍后再试");
+        }
+        return Result.success(authService.changePassword(UserContext.getUserId(), request));
     }
 }
