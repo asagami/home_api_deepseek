@@ -34,7 +34,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class AdminLogOverviewApiIntegrationTest {
 
     private static final String AUTH_HEADER = "Authorization";
-    private static final String PASSWORD = "password123";
+    private static final String PASSWORD = "Str0ngPass2026";
     private static final String ENDPOINT_ECHO = "/api/v1/services/echo";
     private static final String ENDPOINT_TEXT_STATS = "/api/v1/services/text-stats";
 

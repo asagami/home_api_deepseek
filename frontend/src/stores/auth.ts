@@ -1,9 +1,11 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
+  changePassword as changePasswordApi,
   getMe,
   login as loginApi,
   register as registerApi,
+  type ChangePasswordPayload,
   type LoginPayload,
   type RegisterPayload,
   type UserProfile,
@@ -53,6 +55,12 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  async function changePassword(payload: ChangePasswordPayload): Promise<void> {
+    const result = await changePasswordApi(payload)
+    // 服务端已递增会话版本：当前设备换用新令牌，其他设备的下一次请求会因版本不匹配被登出
+    applyToken(result.accessToken)
+  }
+
   async function fetchMe(): Promise<UserProfile | null> {
     if (!token.value) {
       return null
@@ -86,6 +94,7 @@ export const useAuthStore = defineStore('auth', () => {
     balanceQuota,
     login,
     register,
+    changePassword,
     fetchMe,
     ensureMe,
     logout,

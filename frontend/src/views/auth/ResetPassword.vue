@@ -4,9 +4,11 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { CircleCheck, Lock, WarningFilled } from '@element-plus/icons-vue'
 import { resetPassword, verifyResetToken } from '@/api/auth'
+import PasswordStrengthMeter from '@/components/PasswordStrengthMeter.vue'
 import { ApiError } from '@/utils/request'
 import { clearToken } from '@/utils/auth'
 import { toErrorMessage } from '@/utils/error'
+import { analyzePassword } from '@/utils/passwordStrength'
 
 // confirm 阶段只展示确认按钮：邮件安全网关会预取邮件里的链接，
 // 若打开页面就自动换票，令牌会在用户真正点击前被消耗掉。
@@ -30,12 +32,48 @@ const form = reactive({
   confirmPassword: '',
 })
 
+function validateNewPassword(
+  _rule: unknown,
+  value: string,
+  callback: (error?: string | Error) => void,
+): void {
+  if (!value) {
+    callback()
+    return
+  }
+  const analysis = analyzePassword(value)
+  if (!analysis.acceptable) {
+    callback(new Error(analysis.message))
+    return
+  }
+  callback()
+}
+
+function validateConfirmPassword(
+  _rule: unknown,
+  value: string,
+  callback: (error?: string | Error) => void,
+): void {
+  if (!value) {
+    callback()
+    return
+  }
+  if (value !== form.password) {
+    callback(new Error('两次输入的密码不一致'))
+    return
+  }
+  callback()
+}
+
 const rules: FormRules = {
   password: [
     { required: true, message: '请输入新密码', trigger: 'blur' },
-    { min: 8, max: 64, message: '密码长度需在 8-64 之间', trigger: 'blur' },
+    { validator: validateNewPassword, trigger: 'blur' },
   ],
-  confirmPassword: [{ required: true, message: '请再次输入新密码', trigger: 'blur' }],
+  confirmPassword: [
+    { required: true, message: '请再次输入新密码', trigger: 'blur' },
+    { validator: validateConfirmPassword, trigger: 'blur' },
+  ],
 }
 
 onMounted(() => {
@@ -172,9 +210,10 @@ function goLogin(): void {
               :prefix-icon="Lock"
               type="password"
               show-password
-              placeholder="至少 8 位"
+              placeholder="至少 8 位，包含大小写字母和数字"
               autocomplete="new-password"
             />
+            <PasswordStrengthMeter :password="form.password" />
           </el-form-item>
           <el-form-item label="确认新密码" prop="confirmPassword">
             <el-input
@@ -309,6 +348,10 @@ function goLogin(): void {
 
 .form-alert {
   margin-bottom: 1rem;
+}
+
+:deep(.el-form-item__content) {
+  flex-wrap: wrap;
 }
 
 .footer-note {

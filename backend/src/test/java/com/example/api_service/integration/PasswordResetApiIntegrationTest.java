@@ -44,8 +44,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class PasswordResetApiIntegrationTest {
 
     private static final String AUTH_HEADER = "Authorization";
-    private static final String OLD_PASSWORD = "password123";
-    private static final String NEW_PASSWORD = "newPassword456";
+    private static final String OLD_PASSWORD = "Str0ngPass2026";
+    private static final String NEW_PASSWORD = "NewStr0ngPass2027";
 
     @Autowired
     private MockMvc mockMvc;
@@ -200,6 +200,30 @@ class PasswordResetApiIntegrationTest {
                         .content(json(Map.of("token", thirdToken))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value(40005));
+    }
+
+    @Test
+    void shouldKeepTicketWhenNewPasswordViolatesPolicy() throws Exception {
+        String username = "reset_policy";
+        String email = "reset_policy@example.com";
+        register(username, email);
+
+        String rawToken = requestResetAndCaptureToken(username, email);
+        String ticket = verifyTokenAndCaptureTicket(rawToken);
+
+        // 27 个字符但 75 个 UTF-8 字节：策略拒绝，票据写回，允许用同一票据重试
+        mockMvc.perform(post("/api/console/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("ticket", ticket, "newPassword",
+                                "密文口令账号注册登录验证强度策略序列重复常见词典Ab1"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value(40007));
+
+        mockMvc.perform(post("/api/console/auth/reset-password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of("ticket", ticket, "newPassword", NEW_PASSWORD))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(0));
     }
 
     private String registerAndLogin(String username, String email) throws Exception {

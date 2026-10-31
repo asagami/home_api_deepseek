@@ -197,6 +197,10 @@ export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
 | `PASSWORD_RESET_TOKEN_TTL_MINUTES` | `30` | 按需 | 重置链接有效期（分钟） |
 | `PASSWORD_RESET_TICKET_TTL_MINUTES` | `10` | 按需 | 令牌校验通过后一次性票据有效期（分钟） |
 | `PASSWORD_RESET_RESEND_COOLING_SECONDS` | `60` | 按需 | 同一账号两次重置邮件的最小间隔（秒），0 表示不限制 |
+| `RATELIMIT_PASSWORD_CHANGE_MAX_FAILURES` | `5` | 按需 | 修改密码时旧密码允许连续输错的次数 |
+| `RATELIMIT_PASSWORD_CHANGE_WINDOW_MINUTES` | `15` | 按需 | 旧密码错误计数的统计窗口（分钟） |
+| `RATELIMIT_PASSWORD_CHANGE_LOCK_MINUTES` | `30` | 按需 | 达到错误上限后修改密码功能的锁定时间（分钟） |
+| `RATELIMIT_PASSWORD_CHANGE_IP_PER_15_MINUTES` | `10` | 按需 | 修改密码接口每 IP 每 15 分钟的上限 |
 | `ELASTICSEARCH_URL` | `http://localhost:9200` | 默认即可 | 新闻检索使用；未启动不影响应用启动，调用时返回 `50400` |
 | `ELASTICSEARCH_USERNAME` | 空 | 本地 ES 开启认证时填写 | |
 | `ELASTICSEARCH_PASSWORD` | 空 | 同上 | |
@@ -270,8 +274,11 @@ VITE_API_BASE_URL=http://localhost:8080/api
 - `POST /api/console/auth/register`
 - `POST /api/console/auth/login`
 - `POST /api/console/auth/send-email-code`
+- `POST /api/console/auth/forgot-password`
+- `POST /api/console/auth/reset-password/verify`
+- `POST /api/console/auth/reset-password`
 
-解析成功后写入 `UserContext`（ThreadLocal），业务代码通过 `UserContext.getUserId()` 取当前用户。`AdminAuthInterceptor` 在其后执行，只拦截标注了 `@RequireAdmin` 的类或方法。
+解析成功后写入 `UserContext`（ThreadLocal），业务代码通过 `UserContext.getUserId()` 取当前用户。`AdminAuthInterceptor` 在其后执行，只拦截标注了 `@RequireAdmin` 的类或方法。修改密码 `POST /api/console/auth/change-password` 需要登录，用户身份只从 `UserContext` 获取。
 
 ### 4.2 开放网关流水线
 
@@ -1341,6 +1348,27 @@ export function createExample(payload: { name: string }): Promise<ExampleItem> {
   另有 60 秒邮件冷却与 Turnstile 人机校验。
 - 相关错误码：`40005` 重置链接无效或已过期、`40006` 重置票据失效、`42904` 请求过于频繁。
 
+### 11.6 修改密码
+
+入口在控制台左上角用户下拉框的「修改密码」，弹窗包含「当前密码 + 新密码 + 确认新密码」，
+新密码输入时实时展示强度条与规则勾选；浏览器 `autocomplete` 分别为 `current-password` /
+`new-password`，且不禁止粘贴，兼容密码管理器。
+
+| 步骤 | 后端接口 | 说明 |
+|---|---|---|
+| 修改密码 | `POST /api/console/auth/change-password` | body `{ "oldPassword": "...", "newPassword": "..." }`；需登录，用户身份只取自 JWT |
+
+实现要点：
+
+- 密码策略（注册、找回密码、修改密码共用，`security/PasswordPolicy`）：8-64 位，UTF-8 编码后
+  不超过 72 字节（BCrypt 硬上限，一个汉字约占 3 字节），同时包含大写字母、小写字母和数字（符号可选）；
+  拒绝常见弱口令与「常见词 + 纯数字」、「包含用户名」、4 位以上连续字符或 3 个以上重复字符。
+- 修改成功后 `sys_user.token_version + 1`，并返回当前设备的新 JWT；其他设备的历史令牌因
+  `ver` 不匹配立即失效，当前设备无需重新登录。
+- 旧密码连续输错 5 次（15 分钟窗口）锁定修改功能 30 分钟（`42905`），成功或被锁定后清零计数；
+  另有每 IP 每 15 分钟 10 次的窗口限流（`42900`）。
+- 新密码不合规或与旧密码相同时直接拒绝（`40007` / `40009`），不消耗旧密码试错次数。
+
 ---
 
 ## 12. 本地联调与测试注意事项
@@ -1377,6 +1405,9 @@ export DB_PASSWORD=api_service_pass
 - `PasswordResetApiIntegrationTest` 用 `@MockitoBean EmailService` 截获重置链接，覆盖“统一响应 + 只存哈希 + 换票 + 重置 + 旧 JWT 失效”全链路；
   测试环境通过 `app.password-reset.resend-cooling-seconds=0` 关闭邮件冷却，便于连续申请；邮件由
   `ResetMailDispatcher` 异步发送，断言需用 `verify(emailService, timeout(2000))` 等待调用到达。
+- 注册已执行密码强度策略，集成测试统一使用 `Str0ngPass2026`；`"password123"` 这类密码会返回 `40007`。
+- `ChangePasswordApiIntegrationTest` 覆盖改密后当前设备换发新令牌、旧令牌与旧密码失效、旧密码连续错误锁定、
+  弱密码/同密码拒绝；`PasswordPolicyTest` 覆盖策略边界（长度、字符类别、弱口令、连续/重复、包含用户名）。
 - `docs/schema.sql` 中的 1003–1005（个人日志、新闻搜索、IP 归属地）只存在于真实数据库脚本，不在 H2 中。
 - 限流基于 Redis 1 秒固定窗口；连续 MockMvc 调用低 `rateLimitQps` 的 Key 会返回 429，多调用测试请使用高 `rateLimitQps`。
 
@@ -1411,6 +1442,10 @@ export DB_PASSWORD=api_service_pass
 | `40305` API 已下线 | 接口 `status = 0`（未发布 / 被下线） | 在「API管理 → API发布管理」上线 |
 | `40005` 重置链接无效 | 链接超过 30 分钟、已被使用，或签发后账号密码又被重置过 | 重新在登录页申请找回密码 |
 | `40006` 重置会话失效 | 票据超过 10 分钟、已使用，或票据签发后密码已被重新重置 | 重新打开重置邮件中的新链接 |
+| `40007` 密码不符合安全要求 | 不足 8 位、编码后超 72 字节、缺少大小写字母/数字、常见弱口令或包含用户名 | 按强度条提示更换密码 |
+| `40008` 旧密码不正确 | 修改密码时当前密码输错 | 重新输入；连续 5 次会锁定 30 分钟 |
+| `40009` 新旧密码相同 | 新密码与当前密码一致 | 更换一个未使用过的新密码 |
+| `42905` 修改密码已锁定 | 旧密码连续输错 5 次 | 等待 30 分钟后重试 |
 | 生成器提示“目标文件已存在” | 防覆盖保护 | 改用「修改已有接口」，或删除旧文件后重试 |
 | 新生成接口调用返回 `40400`/`40404` | Handler 未注册（未重启）或目录行缺失 | 重新编译重启后端，并确认 `api_endpoint_meta` 有该行 |
 | `40304` 无接口权限 | 缺少 `status=1` 的 `user_api_permission` | 提交申请并审批 |

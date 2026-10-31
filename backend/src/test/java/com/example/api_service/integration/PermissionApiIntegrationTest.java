@@ -42,7 +42,7 @@ class PermissionApiIntegrationTest {
 
     private static final String AUTH_HEADER = "Authorization";
     private static final String API_KEY_HEADER = "X-API-Key";
-    private static final String PASSWORD = "password123";
+    private static final String PASSWORD = "Str0ngPass2026";
     private static final long ECHO_ENDPOINT_ID = 1001L;
     private static final long TEXT_STATS_ENDPOINT_ID = 1002L;
 

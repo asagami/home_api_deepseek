@@ -36,6 +36,11 @@ export interface ResetTokenVerifyResult {
   maskedEmail: string
 }
 
+export interface ChangePasswordPayload {
+  oldPassword: string
+  newPassword: string
+}
+
 export function sendEmailCode(email: string, captchaToken?: string): Promise<void> {
   return consoleHttp.post<void>('/auth/send-email-code', { email, captchaToken })
 }
@@ -65,4 +70,11 @@ export function verifyResetToken(token: string): Promise<ResetTokenVerifyResult>
 /** 使用一次性票据提交新密码 */
 export function resetPassword(ticket: string, newPassword: string): Promise<void> {
   return consoleHttp.post<void>('/auth/reset-password', { ticket, newPassword })
+}
+
+/**
+ * 修改密码：成功后服务端返回当前设备的新令牌，其他设备的历史登录全部失效。
+ */
+export function changePassword(payload: ChangePasswordPayload): Promise<LoginResult> {
+  return consoleHttp.post<LoginResult>('/auth/change-password', payload)
 }
