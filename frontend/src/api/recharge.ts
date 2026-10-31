@@ -5,6 +5,9 @@ export type PayChannel = 'ALIPAY' | 'WECHAT'
 
 export type RechargeOrderStatus = 0 | 1 | 2
 
+/** 1-用户充值，2-管理员发放 */
+export type RechargeOrderSource = 1 | 2
+
 export interface RechargePackage {
   packageId: string
   name: string
@@ -55,8 +58,11 @@ export interface RechargeOrderItem {
   packageId: string
   amountFen: number
   totalPoints: number
-  payChannel: PayChannel
+  /** 管理员发放的流水渠道为 ADMIN */
+  payChannel: PayChannel | 'ADMIN'
   payChannelName: string
+  source: RechargeOrderSource
+  sourceDesc: string
   status: RechargeOrderStatus
   statusDesc: string
   tradeNo: string | null

@@ -1,7 +1,7 @@
 package com.example.api_service.model.vo.recharge;
 
 import com.example.api_service.model.entity.RechargeOrder;
-import com.example.api_service.model.enums.RechargeOrderStatus;
+import com.example.api_service.model.enums.RechargeOrderSource;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.time.LocalDateTime;
@@ -25,7 +25,7 @@ public record RechargeOrderStatusVO(
                 order.getPackageId(),
                 order.getTotalPoints(),
                 order.getStatus(),
-                RechargeOrderStatus.describe(order.getStatus()),
+                RechargeOrderSource.statusDescOf(order.getSource(), order.getStatus()),
                 balanceQuota,
                 order.getTradeNo(),
                 order.getPayTime(),

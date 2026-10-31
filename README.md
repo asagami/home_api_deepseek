@@ -75,16 +75,18 @@ home_api_deepseek/
 
 ### 1.2 数据表
 
-`docs/schema.sql` 包含 7 张表：
+`docs/schema.sql` 包含 9 张表：
 
 | 表 | 用途 |
 |---|---|
 | `sys_user` | 开发者/管理员账号、余额点数、封禁状态 |
+| `password_reset_token` | 找回密码令牌（只存 SHA-256 哈希，一次性使用） |
 | `api_key_info` | API Key（仅存 SHA-256 与脱敏前缀） |
 | `api_endpoint_meta` | 对外接口目录（路径、方法、单价、请求/响应示例、上下线；`status` 默认 `0`，上线后为 `1`） |
 | `user_api_permission` | 用户对接口的申请、审批状态与专属折扣 |
 | `api_access_log` | 调用流水（状态码、耗时、实际扣点） |
-| `recharge_order` | 点数充值订单 |
+| `recharge_order` | 点数充值订单（用户支付 + 管理员发放共用流水，`source` 区分） |
+| `admin_recharge_monthly_usage` | 管理员月度充值限额计数（按 管理员 + 目标账号 + 自然月 唯一） |
 | `sys_email_code` | 邮箱验证码临时表（当前实现以 Redis 为准） |
 
 ---
@@ -209,6 +211,7 @@ export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
 | `RECHARGE_QR_BASE_URL` | `https://pay.example.com/qr` | 本地保持默认即可 | 充值二维码地址前缀 |
 | `RECHARGE_ORDER_TTL_MINUTES` | `15` | 按需 | 充值订单有效期 |
 | `RECHARGE_MOCK_PAY_ENABLED` | `false` | 本地联调充值流程时设为 `true`，生产必须 `false` | 是否启用模拟支付 |
+| `RECHARGE_ADMIN_MONTHLY_LIMIT_PER_USER` | `5000` | 按需 | 同一管理员对同一账号每自然月累计充值上限（点），`0` 表示禁用管理员充值 |
 | `SERVER_PORT` | `8080` | 前端代理需同步修改 | 后端端口 |
 | `app.cors.allowed-origin-patterns` | `http://localhost:5173,http://127.0.0.1:5173` | 前端换端口时修改 | 跨域白名单；需直接改 `application.properties` |
 
@@ -379,7 +382,7 @@ Result.failure(ErrorCode.PARAM_ERROR); // 失败
 | `400xx` | 参数/请求体 | `40000` 参数错误、`40001` 验证码错误 |
 | `401xx` | 未认证 | `40100` 未登录、`40101` 缺少 Key、`40102` Key 无效、`40105` 缺少令牌 |
 | `402xx` | 余额不足 | `40200` 额度不足、`40201` 本次调用点数不足 |
-| `403xx` | 无权限 | `40300` 禁止访问、`40301` 账号封禁、`40304` 无接口权限、`40305` API 已下线 |
+| `403xx` | 无权限 | `40300` 禁止访问、`40301` 账号封禁、`40304` 无接口权限、`40305` API 已下线、`40306` 管理员月度充值额度超限 |
 | `404xx` | 资源不存在 | `40400` 资源不存在、`40404` 接口未登记 |
 | `405xx` | 方法不允许 | `40500` 非 POST 调用开放接口 |
 | `409xx` | 状态冲突 | `40900` 冲突、`40902` 已有待审批申请、`40904` 订单已支付 |
@@ -1368,6 +1371,37 @@ export function createExample(payload: { name: string }): Promise<ExampleItem> {
 - 旧密码连续输错 5 次（15 分钟窗口）锁定修改功能 30 分钟（`42905`），成功或被锁定后清零计数；
   另有每 IP 每 15 分钟 10 次的窗口限流（`42900`）。
 - 新密码不合规或与旧密码相同时直接拒绝（`40007` / `40009`），不消耗旧密码试错次数。
+
+### 11.7 管理员充值留痕与月度限额
+
+前端「用户管理」页的「充值额度」弹窗与「充值记录」抽屉：
+
+| 功能 | 后端接口 | 说明 |
+|---|---|---|
+| 管理员充值 | `POST /api/console/admin/users/{id}/quota` | body `{ "amount": 1000, "remark": "活动补偿" }`；`remark` 选填，最多 255 字 |
+| 当月额度 | `GET /api/console/admin/users/{id}/recharge-quota` | 返回当前管理员本月已充值、剩余额度与月度上限 |
+| 充值记录 | `GET /api/console/admin/users/{id}/recharge-orders?page=1&size=10&source=2&status=1` | 管理员视角查看该用户的用户支付与管理员发放流水 |
+
+实现要点：
+
+- **一本流水**：管理员充值不新建表，而是在 `recharge_order` 写一条 `source=2`、`package_id=ADMIN_GRANT`、
+  `amount_fen=0`、`pay_channel=ADMIN`、`status=1` 的已到账订单，并记录 `operator_id`、`operator_name` 快照与 `remark`。
+  订单号以 `A` 开头，与用户支付的 `R` 单区分。
+- **与充值中心融合**：用户自己的「充值记录」会同时展示管理员发放流水，渠道显示「管理员发放」、状态显示「已到账」、
+  金额显示「—」；用户能解释余额来源，不需要第二套查询入口。
+- **月度限额**：同一管理员对同一账号每个自然月累计不超过 `app.recharge.admin-monthly-limit-per-user`
+  （默认 5000 点，`0` 表示禁用）。计数表 `admin_recharge_monthly_usage` 按
+  `(operator_id, user_id, month_key)` 唯一；充值事务内先 `SELECT ... FOR UPDATE` 锁定计数行再校验、累加，
+  订单、计数、余额三者同事务提交，并发请求不会超发。用户自己支付充值不占用管理员额度。
+- **审计**：管理员可以在用户管理页直接打开「充值记录」抽屉，查看订单号、来源、点数、金额、状态、操作人、
+  备注与时间；充值超限返回 `40306`，余额与计数均不变。
+- **账户余额与 Redis**：管理员充值与支付入账都走 `QuotaLedger.credit`，MySQL 提交后再同步 Redis 热账本；
+  月度限额只约束管理员发放，不影响用户支付充值。
+- **分页契约**：`GET /recharge-orders` 沿用用户管理列表的 query 风格 `page/size`；前端
+  `listUserRechargeOrders` 负责把 `usePagination` 的 `pageNum/pageSize` 映射过去，漏映射会导致后端忽略分页。
+- **测试**：`AdminRechargeAuditApiIntegrationTest` 覆盖接口留痕与限额；`AdminRechargeConcurrencyIntegrationTest`
+  用 10 个线程同抢 5000 点，断言只成功 5 次且订单、计数、余额一致；`AdminRechargeRollbackIntegrationTest`
+  在 `credit` 失败时断言订单、计数、余额一起回滚；`AdminRechargeLimitServiceTest` 覆盖 `addGranted` 命中 0 行。
 
 ---
 

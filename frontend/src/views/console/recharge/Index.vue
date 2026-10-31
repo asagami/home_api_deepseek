@@ -287,7 +287,10 @@ function orderStatusType(status: number): TagType {
   return 'info'
 }
 
-function channelType(channel: PayChannel): TagType {
+function channelType(channel: RechargeOrderItem['payChannel']): TagType {
+  if (channel === 'ADMIN') {
+    return 'warning'
+  }
   return channel === 'ALIPAY' ? 'primary' : 'success'
 }
 
@@ -476,13 +479,24 @@ function formatCountdown(seconds: number): string {
         class="orders-table"
         empty-text="暂无充值记录，选择上方档位开始充值"
       >
-        <el-table-column label="订单号" min-width="215">
+        <el-table-column label="订单号" min-width="240">
           <template #default="{ row }">
-            <code class="order-code">{{ row.orderNo }}</code>
+            <div class="order-cell">
+              <code class="order-code">{{ row.orderNo }}</code>
+              <el-tag
+                v-if="row.source === 2"
+                type="warning"
+                effect="plain"
+                size="small"
+                round
+              >
+                管理员发放
+              </el-tag>
+            </div>
           </template>
         </el-table-column>
 
-        <el-table-column label="套餐点数" width="130">
+        <el-table-column label="到账点数" width="130">
           <template #default="{ row }">
             <span class="points-text">+{{ formatNumber(row.totalPoints) }} 点</span>
           </template>
@@ -490,13 +504,19 @@ function formatCountdown(seconds: number): string {
 
         <el-table-column label="金额" width="120">
           <template #default="{ row }">
-            <span class="money-text">¥ {{ formatYuan(row.amountFen) }}</span>
+            <span v-if="row.source === 2" class="muted-text">—</span>
+            <span v-else class="money-text">¥ {{ formatYuan(row.amountFen) }}</span>
           </template>
         </el-table-column>
 
         <el-table-column label="支付渠道" width="120">
           <template #default="{ row }">
-            <el-tag :type="channelType(row.payChannel)" effect="light" round size="small">
+            <el-tag
+              :type="row.source === 2 ? 'warning' : channelType(row.payChannel)"
+              effect="light"
+              round
+              size="small"
+            >
               {{ row.payChannelName }}
             </el-tag>
           </template>
@@ -1036,6 +1056,13 @@ function formatCountdown(seconds: number): string {
   gap: 1rem;
 }
 
+.order-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
 .order-code {
   padding: 0.12rem 0.35rem;
   border-radius: 5px;
@@ -1053,6 +1080,10 @@ function formatCountdown(seconds: number): string {
 .money-text {
   font-weight: 600;
   color: #0f172a;
+}
+
+.muted-text {
+  color: #94a3b8;
 }
 
 .time-text {

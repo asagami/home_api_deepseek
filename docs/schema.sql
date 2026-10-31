@@ -151,27 +151,45 @@ ALTER TABLE `api_access_log`
 ALTER TABLE `api_access_log`
     ADD INDEX `idx_endpoint_time` (`endpoint_path`, `create_time`, `http_status`);
 
--- 7. 开发者点数充值订单表
+-- 7. 开发者点数充值订单表（用户支付 + 管理员直接充值共用一本流水）
 CREATE TABLE `recharge_order` (
                                   `id` BIGINT NOT NULL COMMENT '主键ID (雪花算法)',
-                                  `order_no` VARCHAR(64) NOT NULL COMMENT '平台商户订单号 (唯一, 如: R202610241530001234)',
+                                  `order_no` VARCHAR(64) NOT NULL COMMENT '平台商户订单号 (唯一, 用户单 R 开头, 管理员单 A 开头)',
                                   `user_id` BIGINT NOT NULL COMMENT '充值用户ID',
-                                  `package_id` VARCHAR(32) NOT NULL COMMENT '套餐档位ID (如: PKG_10, PKG_20)',
-                                  `amount_fen` INT NOT NULL COMMENT '实付金额(单位:分, 10元=1000分, 严禁使用浮点数)',
+                                  `package_id` VARCHAR(32) NOT NULL COMMENT '套餐档位ID (如: PKG_10)；管理员充值为 ADMIN_GRANT',
+                                  `amount_fen` INT NOT NULL COMMENT '实付金额(单位:分)；管理员充值为 0',
                                   `total_points` BIGINT NOT NULL COMMENT '到账总点数 (基础点数 + 赠送点数)',
-                                  `pay_channel` VARCHAR(16) NOT NULL COMMENT '支付渠道: ALIPAY-支付宝, WECHAT-微信支付',
-                                  `status` TINYINT NOT NULL DEFAULT 0 COMMENT '订单状态: 0-待支付(PENDING), 1-已支付(PAID), 2-已关闭/超时(CLOSED)',
+                                  `pay_channel` VARCHAR(16) NOT NULL COMMENT '支付渠道: ALIPAY-支付宝, WECHAT-微信支付；管理员充值为 ADMIN',
+                                  `source` TINYINT NOT NULL DEFAULT 1 COMMENT '订单来源: 1-用户支付充值, 2-管理员直接充值',
+                                  `operator_id` BIGINT DEFAULT NULL COMMENT '操作管理员ID (source=2 时有值)',
+                                  `operator_name` VARCHAR(64) DEFAULT NULL COMMENT '操作管理员用户名快照',
+                                  `remark` VARCHAR(255) DEFAULT NULL COMMENT '充值原因/备注',
+                                  `status` TINYINT NOT NULL DEFAULT 0 COMMENT '订单状态: 0-待支付(PENDING), 1-已支付/已到账(PAID), 2-已关闭/超时(CLOSED)',
                                   `qr_code_url` VARCHAR(512) DEFAULT NULL COMMENT '支付二维码内容串 (供前端生成二维码)',
                                   `trade_no` VARCHAR(64) DEFAULT NULL COMMENT '第三方支付流水号 (支付宝/微信返回)',
-                                  `pay_time` DATETIME DEFAULT NULL COMMENT '实际支付完成时间',
+                                  `pay_time` DATETIME DEFAULT NULL COMMENT '实际支付/到账时间',
                                   `expire_time` DATETIME NOT NULL COMMENT '订单二维码过期时间 (通常为创建时间+15分钟)',
                                   `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                                   `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
                                   `is_deleted` TINYINT NOT NULL DEFAULT 0,
                                   PRIMARY KEY (`id`),
                                   UNIQUE KEY `uk_order_no` (`order_no`),
-                                  KEY `idx_user_status` (`user_id`, `status`, `create_time`)
+                                  KEY `idx_user_status` (`user_id`, `status`, `create_time`),
+                                  KEY `idx_source_time` (`source`, `create_time`)
 ) ENGINE=InnoDB COMMENT='点数充值订单表';
+
+-- 7.1 管理员月度充值限额使用表：同一管理员对同一账号每个自然月累计上限
+CREATE TABLE IF NOT EXISTS `admin_recharge_monthly_usage` (
+                                  `id` BIGINT NOT NULL COMMENT '主键ID (雪花算法)',
+                                  `operator_id` BIGINT NOT NULL COMMENT '操作管理员ID',
+                                  `user_id` BIGINT NOT NULL COMMENT '被充值用户ID',
+                                  `month_key` VARCHAR(7) NOT NULL COMMENT '自然月, 格式 yyyy-MM',
+                                  `granted_points` BIGINT NOT NULL DEFAULT 0 COMMENT '本月已充值点数',
+                                  `create_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                  `update_time` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                                  PRIMARY KEY (`id`),
+                                  UNIQUE KEY `uk_admin_recharge_month` (`operator_id`, `user_id`, `month_key`)
+) ENGINE=InnoDB COMMENT='管理员月度充值限额使用表';
 
 -- ========================================================
 -- 8. 历史数据库增量平滑迁移补丁
@@ -189,3 +207,19 @@ ALTER TABLE `api_endpoint_meta`
 ALTER TABLE `sys_user`
     ADD COLUMN IF NOT EXISTS `token_version` INT NOT NULL DEFAULT 0
     COMMENT '会话版本: 密码重置时+1, 历史 JWT 全部失效' AFTER `status`;
+
+-- 管理员充值留痕：旧库补列。
+-- 注意：MySQL 8 不支持 ADD COLUMN IF NOT EXISTS；可直接依赖服务启动时的 DatabaseSchemaMigrator 自动补列。
+ALTER TABLE `recharge_order`
+    ADD COLUMN IF NOT EXISTS `source` TINYINT NOT NULL DEFAULT 1
+    COMMENT '订单来源: 1-用户支付充值, 2-管理员直接充值' AFTER `pay_channel`,
+    ADD COLUMN IF NOT EXISTS `operator_id` BIGINT DEFAULT NULL
+    COMMENT '操作管理员ID' AFTER `source`,
+    ADD COLUMN IF NOT EXISTS `operator_name` VARCHAR(64) DEFAULT NULL
+    COMMENT '操作管理员用户名快照' AFTER `operator_id`,
+    ADD COLUMN IF NOT EXISTS `remark` VARCHAR(255) DEFAULT NULL
+    COMMENT '充值原因/备注' AFTER `operator_name`;
+
+-- 旧库补索引（若已存在会报 Duplicate key name，可忽略；自愈组件会先检测）
+ALTER TABLE `recharge_order`
+    ADD INDEX `idx_source_time` (`source`, `create_time`);

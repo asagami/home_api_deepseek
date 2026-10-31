@@ -3,6 +3,7 @@ package com.example.api_service.service;
 import com.example.api_service.common.PageResult;
 import com.example.api_service.model.dto.recharge.RechargeOrderCreateRequest;
 import com.example.api_service.model.dto.recharge.RechargeOrderPageRequest;
+import com.example.api_service.model.vo.admin.AdminRechargeOrderVO;
 import com.example.api_service.model.vo.recharge.RechargeOrderCreateVO;
 import com.example.api_service.model.vo.recharge.RechargeOrderStatusVO;
 import com.example.api_service.model.vo.recharge.RechargeOrderVO;
@@ -45,4 +46,21 @@ public interface RechargeService {
      * @param tradeNo 第三方或沙箱支付流水号
      */
     RechargeOrderStatusVO completePayment(Long userId, String orderNo, String tradeNo);
+
+    /**
+     * 管理员直接充值：在同一事务内预占月度限额、写一条 source=ADMIN_GRANT 的已到账订单并加点。
+     *
+     * @param operatorId 操作管理员 ID
+     * @param userId     被充值用户 ID
+     * @param points     本次充值点数
+     * @param remark     备注/原因，可为空
+     * @return 新生成的充值订单（来源为管理员发放）
+     */
+    RechargeOrderVO grantByAdmin(Long operatorId, Long userId, long points, String remark);
+
+    /**
+     * 管理员分页查看指定用户的充值/发放记录。
+     */
+    PageResult<AdminRechargeOrderVO> pageOrdersForAdmin(Long userId, long page, long size,
+                                                        Integer source, Integer status);
 }
