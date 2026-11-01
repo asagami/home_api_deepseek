@@ -139,7 +139,11 @@ watch(activeTab, (tab) => {
   }
 })
 
+/** 请求序号：快速翻页/筛选时丢弃过期响应，避免旧结果覆盖新条件的数据 */
+let loadSeq = 0
+
 async function loadTickets(): Promise<void> {
+  const seq = ++loadSeq
   loading.value = true
   try {
     const result = await listAdminPermissions({
@@ -148,13 +152,20 @@ async function loadTickets(): Promise<void> {
       status: statusFilter.value === '' ? undefined : Number(statusFilter.value),
       keyword: keyword.value.trim() || undefined,
     })
+    if (seq !== loadSeq) {
+      return
+    }
     tickets.value = result.records
     total.value = result.total
     page.value = result.pageNum
   } catch (error) {
-    ElMessage.error(toErrorMessage(error))
+    if (seq === loadSeq) {
+      ElMessage.error(toErrorMessage(error))
+    }
   } finally {
-    loading.value = false
+    if (seq === loadSeq) {
+      loading.value = false
+    }
   }
 }
 
