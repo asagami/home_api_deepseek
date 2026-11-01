@@ -42,8 +42,11 @@ export function usePagination<T, Q extends object>(
   const pageSize = ref(options.pageSize ?? 20)
   const pageSizes = options.pageSizes ?? [10, 20, 50, 100]
   const loading = ref(false)
+  /** 请求序号：快速翻页/筛选时只保留最后一次请求的结果，避免后发先至覆盖数据 */
+  let requestSeq = 0
 
   async function load(): Promise<void> {
+    const seq = ++requestSeq
     loading.value = true
     try {
       const result = await fetcher({
@@ -51,14 +54,21 @@ export function usePagination<T, Q extends object>(
         pageNum: pageNum.value,
         pageSize: pageSize.value,
       })
+      if (seq !== requestSeq) {
+        return
+      }
       records.value = result.records
       total.value = result.total
       pageNum.value = result.pageNum
       pageSize.value = result.pageSize
     } catch (error) {
-      options.onError?.(error)
+      if (seq === requestSeq) {
+        options.onError?.(error)
+      }
     } finally {
-      loading.value = false
+      if (seq === requestSeq) {
+        loading.value = false
+      }
     }
   }
 

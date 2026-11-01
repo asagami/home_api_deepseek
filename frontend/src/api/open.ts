@@ -28,6 +28,19 @@ const openApi = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
+/**
+ * 接口路径白名单，与后端 ApiCodeGenSpec 的 @Pattern 保持一致。
+ *
+ * 调试台会把用户刚粘贴的明文 X-API-Key 发往这里解析出的地址，因此不能信任
+ * 接口目录中的 path：协议相对地址（//evil.com/x）、绝对 URL 或反斜杠变体
+ * 都会让 Key 被带到外部站点。接口目录即使被直接改库污染，也要在这里拦住。
+ */
+const SAFE_ENDPOINT_PATH = /^\/api\/v1\/[A-Za-z0-9_/-]+$/
+
+export function isSafeEndpointPath(path: string): boolean {
+  return SAFE_ENDPOINT_PATH.test(path)
+}
+
 function normalizeMethod(method: string): OpenApiMethod {
   return method.trim().toUpperCase() === 'GET' ? 'GET' : 'POST'
 }
@@ -35,13 +48,21 @@ function normalizeMethod(method: string): OpenApiMethod {
 /**
  * GET 接口把 JSON 字段展开为 Query 参数，POST 接口保持原始 JSON 报文。
  * 同时用于实际请求和调试台的地址预览，避免两处逻辑不一致。
+ * 路径不合法或解析后与当前站点不同源时返回空串，调用方不得据此发送请求。
  */
 export function buildRequestUrl(
   path: string,
   method: OpenApiMethod,
   payload: Record<string, unknown>,
 ): string {
+  if (!isSafeEndpointPath(path)) {
+    return ''
+  }
   const url = new URL(path, window.location.origin)
+  // 兜底：即使白名单被绕过，也要求最终地址与当前站点同源
+  if (url.origin !== window.location.origin) {
+    return ''
+  }
   if (method === 'GET') {
     for (const [key, value] of Object.entries(payload)) {
       if (value === undefined || value === null) {
@@ -58,6 +79,9 @@ export function buildRequestUrl(
  * 不使用 consoleHttp，避免误挂 JWT 或解包 Result，调试台需要展示完整响应。
  */
 export async function callOpenService(input: OpenApiCallInput): Promise<ServiceCallResult> {
+  if (!isSafeEndpointPath(input.path)) {
+    throw new Error('接口路径不合法，已阻止发送请求')
+  }
   const method = normalizeMethod(input.method)
   const requestUrl = buildRequestUrl(input.path, method, input.payload)
 

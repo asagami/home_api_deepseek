@@ -1,4 +1,4 @@
-import { onScopeDispose, ref, watchEffect, type Ref } from 'vue'
+import { onScopeDispose, ref, watch, type Ref } from 'vue'
 
 /**
  * Cloudflare Turnstile 人机校验 composable。
@@ -15,8 +15,12 @@ export interface TurnstileHandle {
   enabled: boolean
   /** 用户完成挑战后的 token，未完成/过期时为空串 */
   token: Ref<string>
+  /** 脚本或 widget 加载失败时的提示，空串表示正常 */
+  error: Ref<string>
   /** 重置 widget 并清空 token，开始新一轮挑战 */
   reset: () => void
+  /** 重新加载失败后的脚本与 widget（网络恢复后调用） */
+  retry: () => void
 }
 
 interface TurnstileApi {
@@ -44,12 +48,18 @@ const siteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined
 
 let scriptLoading: Promise<TurnstileApi> | null = null
 
-/** 全局只加载一次 Turnstile 脚本，多组件复用同一份 promise */
+/**
+ * 全局只加载一次 Turnstile 脚本，多组件复用同一份 promise。
+ * 加载失败时会清空缓存并移除脚本标签，允许用户重试重新插入。
+ */
 function loadTurnstile(): Promise<TurnstileApi> {
   if (window.turnstile) {
     return Promise.resolve(window.turnstile)
   }
-  scriptLoading ??= new Promise((resolve, reject) => {
+  if (scriptLoading) {
+    return scriptLoading
+  }
+  const attempt = new Promise<TurnstileApi>((resolve, reject) => {
     const script = document.createElement('script')
     script.src = SCRIPT_SRC
     script.async = true
@@ -58,11 +68,21 @@ function loadTurnstile(): Promise<TurnstileApi> {
       if (window.turnstile) {
         resolve(window.turnstile)
       } else {
+        script.remove()
         reject(new Error('Turnstile 脚本加载后未暴露全局对象'))
       }
     }
-    script.onerror = () => reject(new Error('Turnstile 脚本加载失败'))
+    script.onerror = () => {
+      // 移除失败的脚本标签，避免重试时复用已损坏的节点
+      script.remove()
+      reject(new Error('Turnstile 脚本加载失败'))
+    }
     document.head.appendChild(script)
+  })
+  // 不缓存 rejected 的 promise：失败后置空，retry 才能重新创建脚本标签
+  scriptLoading = attempt.catch((error: unknown) => {
+    scriptLoading = null
+    throw error
   })
   return scriptLoading
 }
@@ -73,42 +93,56 @@ function loadTurnstile(): Promise<TurnstileApi> {
 export function useTurnstile(container: Ref<HTMLElement | null>): TurnstileHandle {
   const enabled = Boolean(siteKey)
   const token = ref('')
+  const error = ref('')
+  /** retry() 递增后触发 watch 重新执行，用于加载失败后的重试 */
+  const retryTick = ref(0)
   let widgetId: string | null = null
+  /** 渲染序号：丢弃重试/切换容器过程中已过期的异步渲染 */
+  let renderSeq = 0
+
+  function removeWidget(): void {
+    if (widgetId !== null && window.turnstile) {
+      window.turnstile.remove(widgetId)
+    }
+    widgetId = null
+  }
 
   if (enabled) {
-    watchEffect(async (onCleanup) => {
-      const el = container.value
-      if (!el) {
-        return
-      }
-      try {
-        const api = await loadTurnstile()
-        // 异步等待期间容器可能已被 v-if 卸载
-        if (!container.value) {
+    watch(
+      [container, retryTick],
+      async ([el]) => {
+        const seq = ++renderSeq
+        if (!el) {
+          removeWidget()
           return
         }
-        widgetId = api.render(el, {
-          sitekey: siteKey!,
-          callback: (value) => {
-            token.value = value
-          },
-          'expired-callback': () => {
-            token.value = ''
-          },
-          'error-callback': () => {
-            token.value = ''
-          },
-        })
-      } catch (error) {
-        console.error(error)
-      }
-      onCleanup(() => {
-        if (widgetId !== null && window.turnstile) {
-          window.turnstile.remove(widgetId)
-          widgetId = null
+        try {
+          const api = await loadTurnstile()
+          // 异步等待期间容器可能已被 v-if 卸载，或用户已触发新一轮重试
+          if (seq !== renderSeq || container.value !== el) {
+            return
+          }
+          removeWidget()
+          error.value = ''
+          widgetId = api.render(el, {
+            sitekey: siteKey!,
+            callback: (value) => {
+              token.value = value
+            },
+            'expired-callback': () => {
+              token.value = ''
+            },
+            'error-callback': () => {
+              token.value = ''
+            },
+          })
+        } catch (loadError) {
+          error.value = '人机校验加载失败，请检查网络后重试'
+          console.error(loadError)
         }
-      })
-    })
+      },
+      { immediate: true },
+    )
   }
 
   function reset(): void {
@@ -118,12 +152,15 @@ export function useTurnstile(container: Ref<HTMLElement | null>): TurnstileHandl
     }
   }
 
-  onScopeDispose(() => {
-    if (widgetId !== null && window.turnstile) {
-      window.turnstile.remove(widgetId)
-      widgetId = null
+  function retry(): void {
+    if (!enabled) {
+      return
     }
-  })
+    error.value = ''
+    retryTick.value += 1
+  }
 
-  return { enabled, token, reset }
+  onScopeDispose(removeWidget)
+
+  return { enabled, token, error, reset, retry }
 }

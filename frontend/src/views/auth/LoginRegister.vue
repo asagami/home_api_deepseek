@@ -39,6 +39,8 @@ const resetForm = reactive({
 })
 const resetCaptchaContainer = ref<HTMLElement | null>(null)
 const resetTurnstile = useTurnstile(resetCaptchaContainer)
+const resetTurnstileError = resetTurnstile.error
+const retryResetTurnstile = resetTurnstile.retry
 
 const registerForm = reactive({
   username: '',
@@ -58,6 +60,8 @@ const {
 // 人机校验：配置了 VITE_TURNSTILE_SITE_KEY 才渲染 widget，本地开发默认跳过
 const turnstileContainer = ref<HTMLElement | null>(null)
 const turnstile = useTurnstile(turnstileContainer)
+const turnstileError = turnstile.error
+const retryTurnstile = turnstile.retry
 
 const loginRules: FormRules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
@@ -155,10 +159,29 @@ async function handleRequestReset(): Promise<void> {
   }
 }
 
+/**
+ * 只接受同源的站内路径作为登录后的跳转目标。
+ * 仅校验 startsWith('/') 会放过 "//evil.com"：Vue Router 的 web history 在 pushState
+ * 因跨域失败后会退回 location.assign，浏览器再把协议相对地址解析成完整外部 URL。
+ * 因此这里用 URL 解析器做同源校验，"//"、"\/" 等变体都会落到兜底路径。
+ */
+function resolveRedirectTarget(raw: unknown): string {
+  const fallback = '/console/apikeys'
+  if (typeof raw !== 'string' || !raw.startsWith('/') || raw.startsWith('//')) {
+    return fallback
+  }
+  try {
+    const url = new URL(raw, window.location.origin)
+    return url.origin === window.location.origin
+      ? `${url.pathname}${url.search}${url.hash}`
+      : fallback
+  } catch {
+    return fallback
+  }
+}
+
 async function redirectAfterAuth(): Promise<void> {
-  const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : ''
-  const target = redirect.startsWith('/') ? redirect : '/console/apikeys'
-  await router.replace(target)
+  await router.replace(resolveRedirectTarget(route.query.redirect))
 }
 
 async function handleLogin(): Promise<void> {
@@ -405,6 +428,12 @@ async function handleRegister(): Promise<void> {
           </el-form-item>
           <el-form-item v-if="turnstile.enabled" label="人机校验">
             <div ref="turnstileContainer" class="turnstile-box"></div>
+            <p v-if="turnstileError" class="turnstile-error">
+              {{ turnstileError }}
+              <button type="button" class="turnstile-retry" @click="retryTurnstile">
+                重新加载
+              </button>
+            </p>
           </el-form-item>
           <el-form-item label="邮箱验证码" prop="code">
             <div class="code-row">
@@ -509,6 +538,12 @@ async function handleRegister(): Promise<void> {
             </el-form-item>
             <el-form-item v-if="resetTurnstile.enabled" label="人机校验">
               <div ref="resetCaptchaContainer" class="turnstile-box"></div>
+              <p v-if="resetTurnstileError" class="turnstile-error">
+                {{ resetTurnstileError }}
+                <button type="button" class="turnstile-retry" @click="retryResetTurnstile">
+                  重新加载
+                </button>
+              </p>
             </el-form-item>
           </el-form>
         </template>
@@ -755,6 +790,29 @@ async function handleRegister(): Promise<void> {
 
 .turnstile-box {
   width: 100%;
+}
+
+.turnstile-error {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.4rem 0 0;
+  font-size: 0.75rem;
+  color: #dc2626;
+}
+
+.turnstile-retry {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #4f46e5;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.turnstile-retry:hover {
+  text-decoration: underline;
 }
 
 :deep(.el-form-item__content) {

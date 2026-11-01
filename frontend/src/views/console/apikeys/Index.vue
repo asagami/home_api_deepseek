@@ -51,17 +51,28 @@ onMounted(() => {
   void loadKeys()
 })
 
+/** 请求序号：快速翻页时丢弃过期响应，避免旧页码数据覆盖新页码 */
+let loadSeq = 0
+
 async function loadKeys(): Promise<void> {
+  const seq = ++loadSeq
   loading.value = true
   try {
     const result = await listApiKeys({ page: page.value, size: size.value })
+    if (seq !== loadSeq) {
+      return
+    }
     items.value = result.records
     total.value = result.total
     page.value = result.pageNum
   } catch (error) {
-    ElMessage.error(toErrorMessage(error))
+    if (seq === loadSeq) {
+      ElMessage.error(toErrorMessage(error))
+    }
   } finally {
-    loading.value = false
+    if (seq === loadSeq) {
+      loading.value = false
+    }
   }
 }
 

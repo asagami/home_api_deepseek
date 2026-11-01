@@ -58,7 +58,11 @@ function defaultRange(): [string, string] {
   return [toLocalDateTime(start), toLocalDateTime(end)]
 }
 
+/** 请求序号：快速翻页/筛选时丢弃过期响应，避免旧结果覆盖新条件的数据 */
+let loadSeq = 0
+
 async function loadLogs(): Promise<void> {
+  const seq = ++loadSeq
   loading.value = true
   try {
     const result = await listLogs({
@@ -68,13 +72,20 @@ async function loadLogs(): Promise<void> {
       endTime: filters.range?.[1],
       httpStatus: filters.httpStatus,
     })
+    if (seq !== loadSeq) {
+      return
+    }
     items.value = result.records
     total.value = result.total
     page.value = result.pageNum
   } catch (error) {
-    ElMessage.error(toErrorMessage(error))
+    if (seq === loadSeq) {
+      ElMessage.error(toErrorMessage(error))
+    }
   } finally {
-    loading.value = false
+    if (seq === loadSeq) {
+      loading.value = false
+    }
   }
 }
 

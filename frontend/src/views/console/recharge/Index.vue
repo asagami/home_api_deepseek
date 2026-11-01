@@ -43,6 +43,8 @@ let pollTimer: ReturnType<typeof window.setInterval> | null = null
 let countdownTimer: ReturnType<typeof window.setInterval> | null = null
 /** 防止轮询与沙箱支付同时完成时重复提示、重复刷新 */
 let paidHandled = false
+/** 创建订单响应到达时的本地时间戳，用于计算已流逝时间（与服务器时区无关） */
+let orderReceivedAt = 0
 
 const {
   records: orders,
@@ -128,7 +130,8 @@ async function handleCreateOrder(): Promise<void> {
     })
     orderInfo.value = result
     paidHandled = false
-    remainingSeconds.value = secondsUntil(result.expireTime)
+    orderReceivedAt = Date.now()
+    remainingSeconds.value = secondsUntil(result.expireTime, result.createTime)
     dialogVisible.value = true
     startTimers()
     void loadOrders()
@@ -257,17 +260,40 @@ function handleDialogClose(): void {
   orderInfo.value = null
 }
 
-function secondsUntil(value: string | null | undefined): number {
+function parseServerDateTime(value: string | null | undefined): number | null {
   if (!value) {
-    return 15 * 60
+    return null
   }
   // 后端 LocalDateTime 可能带 6 位纳秒，部分浏览器只接受 3 位毫秒
   const normalized = value.replace(/(\.\d{3})\d*$/, '$1')
-  const target = new Date(normalized).getTime()
-  if (Number.isNaN(target)) {
-    return 15 * 60
+  const time = new Date(normalized).getTime()
+  return Number.isNaN(time) ? null : time
+}
+
+/**
+ * 后端以不带时区的 LocalDateTime 下发时间，直接按浏览器时区解析会整体偏移
+ * （服务器与用户时区不同时偏差可达数小时，二维码实际已过期却仍显示有效）。
+ * 改为用 expireTime - createTime 的有效期差值，减去响应到达后的本地流逝时间，
+ * 两个时间的时区偏移相互抵消，结果与浏览器时区无关。
+ */
+function secondsUntil(
+  expireTime: string | null | undefined,
+  createTime: string | null | undefined,
+): number {
+  const fallbackTtl = 15 * 60
+  const expire = parseServerDateTime(expireTime)
+  if (expire === null) {
+    return fallbackTtl
   }
-  return Math.max(0, Math.floor((target - Date.now()) / 1_000))
+  const created = parseServerDateTime(createTime)
+  if (created === null) {
+    // 缺少下单时间时无法计算有效期差值，退化为相对本地时间的估算
+    return Math.max(0, Math.floor((expire - Date.now()) / 1_000))
+  }
+  const ttlSeconds = Math.floor((expire - created) / 1_000)
+  const elapsedSeconds =
+    orderReceivedAt > 0 ? Math.floor((Date.now() - orderReceivedAt) / 1_000) : 0
+  return Math.max(0, ttlSeconds - elapsedSeconds)
 }
 
 function bonusBadge(pkg: RechargePackage): string {

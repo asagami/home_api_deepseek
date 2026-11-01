@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { CopyDocument, Key, Promotion, Refresh } from '@element-plus/icons-vue'
-import { buildRequestUrl, callOpenService, type ServiceCallResult } from '@/api/open'
+import { buildRequestUrl, callOpenService, isSafeEndpointPath, type ServiceCallResult } from '@/api/open'
 import { getMarket, type EndpointMarketItem } from '@/api/permission'
 import { copyText } from '@/utils/clipboard'
 import { toErrorMessage } from '@/utils/error'
@@ -26,9 +26,15 @@ const sending = ref(false)
 const result = ref<ServiceCallResult | null>(null)
 const codeTab = ref<CodeTab>('curl')
 
-/** 仅审批通过且在线可用的接口允许在调试台调用。 */
+/** 仅审批通过、在线可用且路径合法的接口允许在调试台调用。 */
 const selectableEndpoints = computed(() =>
-  endpoints.value.filter((item) => item.applyStatus === 1 && item.endpointStatus === 1),
+  endpoints.value.filter(
+    (item) =>
+      item.applyStatus === 1 &&
+      item.endpointStatus === 1 &&
+      // 目录中的 path 可能被直接改库污染，非法路径不进入可选列表，避免把明文 Key 发往外站
+      isSafeEndpointPath(item.path),
+  ),
 )
 
 const hasSelectableEndpoints = computed(() => selectableEndpoints.value.length > 0)
@@ -162,7 +168,9 @@ function applyDefaultSelection(preferRouteEndpoint: boolean): void {
       ElMessage.success(`已选择「${target.name}」，请求报文已按示例生成`)
       return
     }
-    const inMarket = endpoints.value.find((item) => item.id === routeEndpointId)
+    const inMarket = endpoints.value.find(
+      (item) => item.id === routeEndpointId && isSafeEndpointPath(item.path),
+    )
     if (inMarket) {
       ElMessage.info(`「${inMarket.name}」尚未获得调用权限，请先在 API 市场申请并通过审批`)
     }
@@ -352,7 +360,7 @@ async function copyResponse(): Promise<void> {
             <p v-else-if="!loadingEndpoints" class="field-note">
               {{
                 hasApprovedEndpoints
-                  ? '已审批的接口当前均在维护中，请稍后再试。'
+                  ? '已审批的接口当前均不可用（维护中或配置异常），请稍后再试。'
                   : '暂无可调试接口，仅展示当前账号已通过审批的开放接口。'
               }}
             </p>
@@ -376,7 +384,7 @@ async function copyResponse(): Promise<void> {
           <el-alert
             v-else-if="!loadingEndpoints && !hasSelectableEndpoints"
             type="info"
-            title="已审批的接口当前均在维护中，请稍后再试。"
+            title="已审批的接口当前均不可用（维护中或配置异常），请稍后再试。"
             :closable="false"
             show-icon
             class="permission-alert"
